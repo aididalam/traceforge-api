@@ -1,12 +1,14 @@
 {
   "name": "@traceforge/api",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "TraceForge tenant-scoped HTTP API over the indexed MySQL read model",
   "main": "index.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/server.ts",
-    "test:acceptance": "node --test test/acceptance.test.mjs"
+    "test:acceptance": "node --test test/acceptance.test.mjs",
+    "api:migrate": "tsx src/api-migrate.ts",
+    "auth:issue": "tsx src/issue-token.ts"
   },
   "keywords": [],
   "author": "",

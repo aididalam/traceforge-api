@@ -14,6 +14,12 @@ import {
   db,
 } from "./db.js";
 
+import {
+  authContextFor,
+  authHook,
+  tenantCanAccessDocument,
+} from "./auth.js";
+
 import { registerDiscoveryRoutes } from "./routes/discovery.js";
 
 const app =
@@ -354,6 +360,11 @@ app.setErrorHandler(
   },
 );
 
+app.addHook(
+  "preHandler",
+  authHook,
+);
+
 app.get(
   "/health",
   {
@@ -519,6 +530,27 @@ app.get<{
       return apiError(
         "invalid_identifier",
         "contentHash must be a bytes32 hex value.",
+      );
+    }
+
+    const auth =
+      authContextFor(
+        request,
+      );
+
+    if (
+      !await tenantCanAccessDocument(
+        auth.tenantId,
+        contentHash,
+      )
+    ) {
+      reply.code(
+        404,
+      );
+
+      return apiError(
+        "document_not_found",
+        "Off-chain document was not found.",
       );
     }
 

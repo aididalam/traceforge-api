@@ -1,9 +1,36 @@
+import {
+  readFileSync as readLocalFile,
+} from "node:fs";
+
+import {
+  homedir,
+} from "node:os";
+
+import {
+  resolve,
+} from "node:path";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const baseUrl =
   process.env.API_BASE_URL ??
   "http://127.0.0.1:3000";
+
+const tokenFile =
+  process.env.TRACEFORGE_API_TOKEN_FILE ??
+  resolve(
+    homedir(),
+    ".traceforge/secrets/api-sandbox.token",
+  );
+
+const apiToken =
+  process.env.TRACEFORGE_API_TOKEN ??
+  readLocalFile(
+    tokenFile,
+    "utf8",
+  ).trim();
+
 
 const tenantId =
   process.env.TRACEFORGE_TEST_TENANT_ID ??
@@ -23,10 +50,25 @@ const batchMetadataHash =
 
 async function getJson(
   path,
+  {
+    authenticated = true,
+    token = apiToken,
+  } = {},
 ) {
+  const headers =
+    authenticated
+      ? {
+          Authorization:
+            `Bearer ${token}`,
+        }
+      : {};
+
   const response =
     await fetch(
       `${baseUrl}${path}`,
+      {
+        headers,
+      },
     );
 
   const body =
@@ -419,6 +461,59 @@ test(
     assert.equal(
       second.body.page.nextAfterEventId,
       null,
+    );
+  },
+);
+
+test(
+  "protected API rejects missing authentication",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await getJson(
+        `/v1/tenants/${tenantId}/entities?limit=1`,
+        {
+          authenticated:
+            false,
+        },
+      );
+
+    assert.equal(
+      response.status,
+      401,
+    );
+
+    assert.equal(
+      body.error?.code,
+      "authentication_required",
+    );
+  },
+);
+
+test(
+  "tenant token cannot cross tenant boundary",
+  async () => {
+    const otherTenant =
+      `0x${"11".repeat(32)}`;
+
+    const {
+      response,
+      body,
+    } =
+      await getJson(
+        `/v1/tenants/${otherTenant}/entities?limit=1`,
+      );
+
+    assert.equal(
+      response.status,
+      403,
+    );
+
+    assert.equal(
+      body.error?.code,
+      "tenant_access_denied",
     );
   },
 );

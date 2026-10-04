@@ -148,3 +148,31 @@ TRACEFORGE_TEST_BATCH_ID
 TRACEFORGE_TEST_ITEM_ID
 TRACEFORGE_TEST_BATCH_METADATA_HASH
 ```
+
+## Tenant-scoped API authentication
+
+API v0.6 protects all `/v1/*` routes with tenant-scoped bearer tokens.
+
+Tokens are generated locally and only a SHA-256 digest is stored in MySQL.
+The plaintext token should be kept in a protected local secret file and never
+committed or pasted into logs.
+
+System endpoints such as `/health`, `/ready`, `/docs`, and `/openapi.json`
+remain unauthenticated.
+
+Issue a local sandbox token after applying API migrations:
+
+```text
+npm run api:migrate
+npm run auth:issue -- --tenant <tenant-id> --name sandbox-dev --output ~/.traceforge/secrets/api-sandbox.token
+```
+
+Use the token:
+
+```text
+Authorization: Bearer <token>
+```
+
+Tenant-scoped routes reject a valid token when its tenant does not match the
+route tenant. The hash-based document endpoint is also restricted to documents
+referenced by the authenticated token's tenant.
