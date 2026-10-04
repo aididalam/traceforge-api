@@ -116,3 +116,35 @@ All three endpoints use event-order cursor pagination:
 
 Responses preserve the original hashes and include verified semantic labels and
 resolved metadata when available.
+
+## Acceptance tests
+
+TraceForge API includes executable acceptance tests against the canonical local
+sandbox dataset.
+
+Start the API first:
+
+```bash
+npm run dev
+```
+
+Then, from another terminal:
+
+```bash
+npm run test:acceptance
+```
+
+The suite verifies health/readiness, current entity state, closed lifecycle,
+off-chain document resolution, history semantics, tenant discovery, cursor
+pagination, structured validation errors, and OpenAPI exposure.
+
+The default fixture IDs target the TraceForge chain-9009 sandbox. They can be
+overridden with:
+
+```text
+API_BASE_URL
+TRACEFORGE_TEST_TENANT_ID
+TRACEFORGE_TEST_BATCH_ID
+TRACEFORGE_TEST_ITEM_ID
+TRACEFORGE_TEST_BATCH_METADATA_HASH
+```

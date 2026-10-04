@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "dev": "tsx src/server.ts"
+    "dev": "tsx src/server.ts",
+    "test:acceptance": "node --test test/acceptance.test.mjs"
   },
   "keywords": [],
   "author": "",
