@@ -282,3 +282,54 @@ The live preflight tests verify:
 - `/v1/auth/preflight` is present in OpenAPI.
 
 No acceptance test signs or broadcasts a transaction.
+
+## Controlled custody simulation
+
+API v0.9 adds the first transaction-shaped endpoint:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/custody/proposals/simulate
+```
+
+It **never broadcasts**.
+
+Before simulation it:
+
+- requires an organization-bound `chain:write` token;
+- loads the configured signer key file without printing it;
+- rejects key files with group/other permissions;
+- derives the signer address and requires it to equal
+  `TRACEFORGE_SIGNER_ADDRESS`;
+- verifies live chain/network/contract/tenant/org/wallet/membership state;
+- verifies current custody and absence of a pending transfer;
+- verifies the destination organization and membership;
+- discovers a live role whose `CUSTODY_TRANSFER` capability passes
+  `hasCapability`;
+- runs `simulateContract`;
+- estimates gas;
+- returns `broadcast: false`.
+
+Runtime configuration:
+
+```text
+TRACEFORGE_SIGNER_KEY_FILE=~/.traceforge/secrets/sandbox-distributor.key
+```
+
+No wallet client and no transaction-broadcast call exists in this milestone.
+
+## v0.9 custody simulation acceptance coverage
+
+The acceptance suite verifies the first transaction-shaped API flow without
+broadcasting a transaction.
+
+It checks that:
+
+- the distributor writer can simulate `proposeCustodyTransfer`;
+- every live preflight check succeeds;
+- gas estimation returns a positive value;
+- the response explicitly reports `broadcast: false`;
+- a follow-up live preflight proves no pending custody transfer was created;
+- a read-only token cannot access the simulation endpoint;
+- the simulation route is exposed in OpenAPI.
+
+The suite never submits a state-changing transaction.

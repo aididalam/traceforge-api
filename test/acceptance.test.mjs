@@ -53,6 +53,18 @@ const distributorRoleId =
   process.env.TRACEFORGE_TEST_DISTRIBUTOR_ROLE_ID ??
   "0x5027b0e868d0fd05911c89da388fdd1393cc1ba493938df52179c481df0c00d3";
 
+const producerOrganizationId =
+  process.env.TRACEFORGE_TEST_PRODUCER_ORG_ID ??
+  "0x19cb2dd8952a626d9254af21690cefaf9dba00e701bcd6805ac85a5d18cab11a";
+
+const custodyProposalEventType =
+  process.env.TRACEFORGE_TEST_CUSTODY_PROPOSAL_EVENT_TYPE ??
+  "0x18abdf6d7f077cf392fc5218ce1cdd22017ca21480a9828a6fa2d8f086bb480b";
+
+const custodyProposalEvidenceHash =
+  process.env.TRACEFORGE_TEST_CUSTODY_PROPOSAL_EVIDENCE_HASH ??
+  "0x2c27d8a4909372e10142f1c47099a0de6b48d7d2a3b190da5a68a920a3b031c8";
+
 
 
 const tenantId =
@@ -102,6 +114,50 @@ async function getJson(
     body,
   };
 }
+
+async function postJson(
+  path,
+  body,
+  {
+    authenticated = true,
+    token = apiToken,
+  } = {},
+) {
+  const headers = {
+    "Content-Type":
+      "application/json",
+    ...(authenticated
+      ? {
+          Authorization:
+            `Bearer ${token}`,
+        }
+      : {}),
+  };
+
+  const response =
+    await fetch(
+      `${baseUrl}${path}`,
+      {
+        method:
+          "POST",
+        headers,
+        body:
+          JSON.stringify(
+            body,
+          ),
+      },
+    );
+
+  const responseBody =
+    await response.json();
+
+  return {
+    response,
+    body:
+      responseBody,
+  };
+}
+
 
 test(
   "health and readiness",
@@ -489,6 +545,197 @@ test(
 );
 
 test(
+  "custody proposal simulation succeeds without broadcasting",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await postJson(
+        `/v1/tenants/${tenantId}/entities/${batchId}/custody/proposals/simulate`,
+        {
+          toOrganizationId:
+            producerOrganizationId,
+
+          eventType:
+            custodyProposalEventType,
+
+          evidenceHash:
+            custodyProposalEvidenceHash,
+        },
+        {
+          token:
+            writerToken,
+        },
+      );
+
+    assert.equal(
+      response.status,
+      200,
+    );
+
+    assert.equal(
+      body.simulated,
+      true,
+    );
+
+    assert.equal(
+      body.broadcast,
+      false,
+    );
+
+    assert.equal(
+      body.operation,
+      "proposeCustodyTransfer",
+    );
+
+    assert.equal(
+      body.chainId,
+      9009,
+    );
+
+    assert.equal(
+      body.tenantId,
+      tenantId,
+    );
+
+    assert.equal(
+      body.entityId,
+      batchId,
+    );
+
+    assert.equal(
+      body.organizationId,
+      distributorOrganizationId,
+    );
+
+    assert.equal(
+      body.roleId,
+      distributorRoleId,
+    );
+
+    assert.equal(
+      body.toOrganizationId,
+      producerOrganizationId,
+    );
+
+    assert.equal(
+      body.eventType,
+      custodyProposalEventType,
+    );
+
+    assert.equal(
+      body.evidenceHash,
+      custodyProposalEvidenceHash,
+    );
+
+    assert.equal(
+      body.request?.functionName,
+      "proposeCustodyTransfer",
+    );
+
+    assert.ok(
+      BigInt(
+        body.estimatedGas,
+      ) > 0n,
+    );
+
+    for (
+      const check of
+        body.checks
+    ) {
+      assert.equal(
+        check.ok,
+        true,
+        `simulation preflight check failed: ${check.name}`,
+      );
+    }
+  },
+);
+
+test(
+  "custody simulation does not mutate chain state",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await getJson(
+        `/v1/auth/preflight?capability=CUSTODY_TRANSFER&entityId=${batchId}&requireCustody=true&pendingCustody=forbidden`,
+        {
+          token:
+            writerToken,
+        },
+      );
+
+    assert.equal(
+      response.status,
+      200,
+    );
+
+    assert.equal(
+      body.ready,
+      true,
+    );
+
+    assert.equal(
+      body.pendingCustody,
+      null,
+    );
+
+    const pending =
+      body.checks.find(
+        (check) =>
+          check.name ===
+          "pending_custody",
+      );
+
+    assert.equal(
+      pending?.ok,
+      true,
+    );
+
+    assert.equal(
+      pending?.detail,
+      "mode=forbidden exists=false",
+    );
+  },
+);
+
+test(
+  "read-only token cannot simulate custody proposal",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await postJson(
+        `/v1/tenants/${tenantId}/entities/${batchId}/custody/proposals/simulate`,
+        {
+          toOrganizationId:
+            producerOrganizationId,
+
+          eventType:
+            custodyProposalEventType,
+
+          evidenceHash:
+            custodyProposalEvidenceHash,
+        },
+      );
+
+    assert.equal(
+      response.status,
+      403,
+    );
+
+    assert.equal(
+      body.error?.code,
+      "insufficient_scope",
+    );
+  },
+);
+
+test(
   "live chain preflight authorizes the distributor writer",
   async () => {
     const {
@@ -832,6 +1079,12 @@ test(
     assert.ok(
       body.paths?.[
         "/v1/auth/preflight"
+      ],
+    );
+
+    assert.ok(
+      body.paths?.[
+        "/v1/tenants/{tenantId}/entities/{entityId}/custody/proposals/simulate"
       ],
     );
   },

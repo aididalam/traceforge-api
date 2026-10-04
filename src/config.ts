@@ -108,6 +108,10 @@ export const config = {
         "TRACEFORGE_SIGNER_ADDRESS",
         process.env.TRACEFORGE_SIGNER_ADDRESS,
       ),
+
+    signerKeyFile:
+      process.env.TRACEFORGE_SIGNER_KEY_FILE ??
+      null,
   },
 
   mysql: {
