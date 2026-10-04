@@ -96,3 +96,23 @@ History events include:
 
 The original hash is always returned. Unknown semantics are never guessed:
 their label is `null`.
+
+## Discovery endpoints
+
+API v0.5 adds tenant-scoped browse endpoints so clients do not need to know
+entity, organization, or relationship IDs in advance.
+
+```text
+GET /v1/tenants/:tenantId/entities
+GET /v1/tenants/:tenantId/organizations
+GET /v1/tenants/:tenantId/relationships
+```
+
+All three endpoints use event-order cursor pagination:
+
+```text
+?limit=50&afterEventId=123
+```
+
+Responses preserve the original hashes and include verified semantic labels and
+resolved metadata when available.

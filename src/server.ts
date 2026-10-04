@@ -14,6 +14,8 @@ import {
   db,
 } from "./db.js";
 
+import { registerDiscoveryRoutes } from "./routes/discovery.js";
+
 const app =
   Fastify({
     logger: true,
@@ -1325,6 +1327,8 @@ app.get<{
     };
   },
 );
+
+await registerDiscoveryRoutes(app);
 
 app.get(
   "/openapi.json",
