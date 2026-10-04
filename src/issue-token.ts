@@ -23,9 +23,20 @@ import {
   db,
 } from "./db.js";
 
+const allowedScopes =
+  new Set([
+    "tenant:read",
+    "chain:write",
+  ]);
+
 interface TenantRow
   extends RowDataPacket {
   tenant_id: string;
+}
+
+interface MembershipRow
+  extends RowDataPacket {
+  organization_id: string;
 }
 
 function argument(
@@ -47,10 +58,50 @@ function argument(
   ];
 }
 
+function argumentsFor(
+  name: string,
+): string[] {
+  const values: string[] =
+    [];
+
+  for (
+    let index = 0;
+    index <
+    process.argv.length;
+    index += 1
+  ) {
+    if (
+      process.argv[index] ===
+      name
+    ) {
+      const value =
+        process.argv[
+          index + 1
+        ];
+
+      if (
+        value
+      ) {
+        values.push(
+          value,
+        );
+      }
+    }
+  }
+
+  return values;
+}
+
 const tenantId =
   argument(
     "--tenant",
   );
+
+const organizationId =
+  argument(
+    "--organization",
+  ) ??
+  null;
 
 const tokenName =
   argument(
@@ -63,6 +114,23 @@ const output =
     "--output",
   );
 
+const requestedScopes =
+  argumentsFor(
+    "--scope",
+  );
+
+const scopes =
+  requestedScopes.length >
+  0
+    ? [
+        ...new Set(
+          requestedScopes,
+        ),
+      ]
+    : [
+        "tenant:read",
+      ];
+
 if (
   !tenantId ||
   !/^0x[0-9a-fA-F]{64}$/.test(
@@ -71,6 +139,42 @@ if (
 ) {
   throw new Error(
     "--tenant must be a bytes32 tenant ID",
+  );
+}
+
+if (
+  organizationId &&
+  !/^0x[0-9a-fA-F]{64}$/.test(
+    organizationId,
+  )
+) {
+  throw new Error(
+    "--organization must be a bytes32 organization ID",
+  );
+}
+
+for (
+  const scope of scopes
+) {
+  if (
+    !allowedScopes.has(
+      scope,
+    )
+  ) {
+    throw new Error(
+      `Unsupported scope: ${scope}`,
+    );
+  }
+}
+
+if (
+  scopes.includes(
+    "chain:write",
+  ) &&
+  !organizationId
+) {
+  throw new Error(
+    "chain:write tokens must be bound to an organization",
   );
 }
 
@@ -103,6 +207,37 @@ if (
   throw new Error(
     "Tenant does not exist in the indexed read model.",
   );
+}
+
+if (
+  organizationId
+) {
+  const [memberships] =
+    await db.query<
+      MembershipRow[]
+    >(
+      `
+        SELECT organization_id
+        FROM tenant_memberships
+        WHERE tenant_id = ?
+          AND organization_id = ?
+          AND active = TRUE
+        LIMIT 1
+      `,
+      [
+        tenantId,
+        organizationId,
+      ],
+    );
+
+  if (
+    memberships.length ===
+    0
+  ) {
+    throw new Error(
+      "Organization is not an active member of the tenant.",
+    );
+  }
 }
 
 const token =
@@ -142,16 +277,24 @@ await db.query(
       token_hash,
       token_hint,
       tenant_id,
-      token_name
+      organization_id,
+      token_name,
+      scopes
     )
-    VALUES (?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `,
   [
     tokenId,
     tokenHash,
     tokenHint,
     tenantId.toLowerCase(),
+    organizationId
+      ? organizationId.toLowerCase()
+      : null,
     tokenName,
+    JSON.stringify(
+      scopes,
+    ),
   ],
 );
 
@@ -198,6 +341,14 @@ console.log(
 
 console.log(
   `Tenant: ${tenantId}`,
+);
+
+console.log(
+  `Organization: ${organizationId ?? "none"}`,
+);
+
+console.log(
+  `Scopes: ${scopes.join(", ")}`,
 );
 
 console.log(

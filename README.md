@@ -176,3 +176,36 @@ Authorization: Bearer <token>
 Tenant-scoped routes reject a valid token when its tenant does not match the
 route tenant. The hash-based document endpoint is also restricted to documents
 referenced by the authenticated token's tenant.
+
+## API principals and scopes
+
+API v0.7 separates read access from future blockchain write authority.
+
+Supported scopes:
+
+```text
+tenant:read
+chain:write
+```
+
+Existing v0.6 tokens are migrated to `tenant:read`.
+
+A token with `chain:write` must be bound to an active tenant organization. This
+does not itself grant blockchain capability; future write endpoints must also
+verify the bound organization's on-chain role/capability and use a controlled
+signer.
+
+Inspect the current authenticated principal:
+
+```text
+GET /v1/auth/me
+```
+
+Local token lifecycle helpers:
+
+```text
+npm run auth:list
+npm run auth:revoke -- --token-id <id>
+```
+
+Do not issue `chain:write` tokens until the signer boundary is configured.

@@ -19,17 +19,29 @@ import {
   db,
 } from "./db.js";
 
-interface TokenRow
-  extends RowDataPacket {
-  token_id: string;
-  tenant_id: string;
-  token_name: string;
-}
+export type ApiScope =
+  | "tenant:read"
+  | "chain:write";
 
 export interface AuthContext {
   tokenId: string;
   tenantId: string;
+  organizationId: string | null;
   tokenName: string;
+  scopes: ApiScope[];
+}
+
+interface TokenRow
+  extends RowDataPacket {
+  token_id: string;
+  tenant_id: string;
+  organization_id:
+    | string
+    | null;
+  token_name: string;
+  scopes:
+    | string
+    | ApiScope[];
 }
 
 const authContexts =
@@ -48,6 +60,32 @@ function apiError(
       message,
     },
   };
+}
+
+function parseScopes(
+  value:
+    | string
+    | ApiScope[],
+): ApiScope[] {
+  const parsed =
+    typeof value ===
+    "string"
+      ? JSON.parse(
+          value,
+        )
+      : value;
+
+  if (
+    !Array.isArray(
+      parsed,
+    )
+  ) {
+    throw new Error(
+      "Stored API token scopes are invalid.",
+    );
+  }
+
+  return parsed as ApiScope[];
 }
 
 function bearerToken(
@@ -134,7 +172,9 @@ export async function authHook(
         SELECT
           token_id,
           tenant_id,
-          token_name
+          organization_id,
+          token_name,
+          scopes
         FROM api_auth_tokens
         WHERE token_hash = ?
           AND active = TRUE
@@ -150,7 +190,8 @@ export async function authHook(
     );
 
   if (
-    rows.length === 0
+    rows.length ===
+    0
   ) {
     reply
       .header(
@@ -180,8 +221,18 @@ export async function authHook(
     tenantId:
       row.tenant_id.toLowerCase(),
 
+    organizationId:
+      row.organization_id
+        ? row.organization_id.toLowerCase()
+        : null,
+
     tokenName:
       row.token_name,
+
+    scopes:
+      parseScopes(
+        row.scopes,
+      ),
   };
 
   authContexts.set(
@@ -236,6 +287,38 @@ export function authContextFor(
   }
 
   return context;
+}
+
+export function requireScope(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  scope: ApiScope,
+): boolean {
+  const context =
+    authContextFor(
+      request,
+    );
+
+  if (
+    context.scopes.includes(
+      scope,
+    )
+  ) {
+    return true;
+  }
+
+  reply
+    .code(
+      403,
+    )
+    .send(
+      apiError(
+        "insufficient_scope",
+        `Required API scope: ${scope}`,
+      ),
+    );
+
+  return false;
 }
 
 export async function tenantCanAccessDocument(

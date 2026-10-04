@@ -21,6 +21,7 @@ import {
 } from "./auth.js";
 
 import { registerDiscoveryRoutes } from "./routes/discovery.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 
 const app =
   Fastify({
@@ -1360,6 +1361,7 @@ app.get<{
   },
 );
 
+await registerAuthRoutes(app);
 await registerDiscoveryRoutes(app);
 
 app.get(

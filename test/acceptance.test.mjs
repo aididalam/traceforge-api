@@ -466,6 +466,47 @@ test(
 );
 
 test(
+  "authenticated token exposes its principal and scopes",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await getJson(
+        "/v1/auth/me",
+      );
+
+    assert.equal(
+      response.status,
+      200,
+    );
+
+    assert.equal(
+      body.tenantId,
+      tenantId,
+    );
+
+    assert.equal(
+      body.organizationId,
+      null,
+    );
+
+    assert.ok(
+      body.scopes.includes(
+        "tenant:read",
+      ),
+    );
+
+    assert.equal(
+      body.scopes.includes(
+        "chain:write",
+      ),
+      false,
+    );
+  },
+);
+
+test(
   "protected API rejects missing authentication",
   async () => {
     const {

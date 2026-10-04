@@ -20,6 +20,21 @@ interface MigrationRow
   migration_name: string;
 }
 
+function splitStatements(
+  sql: string,
+): string[] {
+  return sql
+    .split(";")
+    .map(
+      (statement) =>
+        statement.trim(),
+    )
+    .filter(
+      (statement) =>
+        statement.length > 0,
+    );
+}
+
 const migrationsDir =
   resolve(
     "migrations",
@@ -98,15 +113,31 @@ for (
       "utf8",
     );
 
+  const statements =
+    splitStatements(
+      sql,
+    );
+
+  if (
+    statements.length ===
+    0
+  ) {
+    throw new Error(
+      `Migration is empty: ${name}`,
+    );
+  }
+
   const connection =
     await db.getConnection();
 
   try {
-    await connection.beginTransaction();
-
-    await connection.query(
-      sql,
-    );
+    for (
+      const statement of statements
+    ) {
+      await connection.query(
+        statement,
+      );
+    }
 
     await connection.query(
       `
@@ -120,17 +151,9 @@ for (
       ],
     );
 
-    await connection.commit();
-
     console.log(
       `APPLY ${name}`,
     );
-  } catch (
-    error
-  ) {
-    await connection.rollback();
-
-    throw error;
   } finally {
     connection.release();
   }
