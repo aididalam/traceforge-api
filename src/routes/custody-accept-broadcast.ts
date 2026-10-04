@@ -18,7 +18,6 @@ import {
 } from "viem";
 
 import type {
-  Address,
   Hex,
 } from "viem";
 
@@ -43,19 +42,21 @@ import {
 } from "../db.js";
 
 import {
-  runtimeBytecodeIntegrity,
-} from "../runtime-integrity.js";
-
-import {
   loadOrganizationAccount,
 } from "../signer.js";
 
 import {
+  evaluateWritePrincipalSafety,
+  hasFailedChecks,
+} from "../write-safety.js";
+
+import type {
+  WriteCheck,
+} from "../write-safety.js";
+
+import {
   traceForgeWriteAbi,
 } from "../traceforge-write-abi.js";
-
-const custodyTransferCapability =
-  4;
 
 const operationName =
   "acceptCustodyTransfer";
@@ -69,11 +70,6 @@ interface Body {
   eventType: string;
   evidenceHash: string;
   confirm: string;
-}
-
-interface RoleRow
-  extends RowDataPacket {
-  role_id: string;
 }
 
 interface OperationRow
@@ -122,12 +118,6 @@ interface OperationRow
   error_message:
     | string
     | null;
-}
-
-interface Check {
-  name: string;
-  ok: boolean;
-  detail?: string;
 }
 
 function apiError(
@@ -961,143 +951,32 @@ export async function registerCustodyAcceptanceBroadcastRoutes(
         );
       }
 
-      const checks: Check[] =
+      const checks: WriteCheck[] =
         [];
 
       try {
-        const chainId =
-          await chainClient.getChainId();
+        const principalSafety =
+          await evaluateWritePrincipalSafety({
+            tenantId,
 
-        checks.push({
-          name:
-            "chain_id",
+            organizationId:
+              auth.organizationId,
 
-          ok:
-            chainId ===
-            config.traceforge.chainId,
+            account,
 
-          detail:
-            `expected=${config.traceforge.chainId} actual=${chainId}`,
-        });
+            capabilityIndex:
+              4,
 
-        const bytecode =
-          await chainClient.getBytecode({
-            address:
-              contractAddress,
+            capabilityCheckName:
+              "custody_transfer_capability",
           });
 
-        checks.push({
-          name:
-            "contract_code",
+        checks.push(
+          ...principalSafety.checks,
+        );
 
-          ok:
-            Boolean(
-              bytecode &&
-              bytecode !==
-              "0x",
-            ),
-        });
-
-        const runtimeIntegrity =
-          runtimeBytecodeIntegrity(
-            bytecode,
-          );
-
-        checks.push({
-          name:
-            "runtime_bytecode_hash",
-
-          ok:
-            runtimeIntegrity.ok,
-
-          detail:
-            `expected=${runtimeIntegrity.expected} actual=${runtimeIntegrity.actual}`,
-        });
-
-        const tenant =
-          await readTraceForge(
-            "getTenant",
-            [
-              asBytes32(
-                tenantId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "tenant_active",
-
-          ok:
-            tenant.exists &&
-            tenant.active,
-        });
-
-        const organization =
-          await readTraceForge(
-            "getOrganization",
-            [
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "organization_active",
-
-          ok:
-            organization.exists &&
-            organization.active,
-        });
-
-        const activeWallet =
-          await readTraceForge(
-            "isActiveWalletForOrganization",
-            [
-              account.address as Address,
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "signer_wallet_binding",
-
-          ok:
-            Boolean(
-              activeWallet,
-            ),
-
-          detail:
-            account.address,
-        });
-
-        const membership =
-          await readTraceForge(
-            "isActiveTenantMember",
-            [
-              asBytes32(
-                tenantId,
-              ),
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "tenant_membership",
-
-          ok:
-            Boolean(
-              membership,
-            ),
-        });
+        const roleId =
+          principalSafety.roleId;
 
         const entity =
           await readTraceForge(
@@ -1216,78 +1095,10 @@ export async function registerCustodyAcceptanceBroadcastRoutes(
           });
         }
 
-        const [roleRows] =
-          await db.query<
-            RoleRow[]
-          >(
-            `
-              SELECT role_id
-              FROM organization_roles
-              WHERE tenant_id = ?
-                AND organization_id = ?
-                AND active = TRUE
-              ORDER BY role_id
-            `,
-            [
-              tenantId.toLowerCase(),
-              auth.organizationId,
-            ],
-          );
-
-        let roleId:
-          string | null =
-            null;
-
-        for (
-          const role of roleRows
-        ) {
-          const allowed =
-            await readTraceForge(
-              "hasCapability",
-              [
-                asBytes32(
-                  tenantId,
-                ),
-                account.address as Address,
-                asBytes32(
-                  role.role_id,
-                ),
-                custodyTransferCapability,
-              ],
-            );
-
-          if (
-            allowed
-          ) {
-            roleId =
-              role.role_id;
-
-            break;
-          }
-        }
-
-        checks.push({
-          name:
-            "custody_transfer_capability",
-
-          ok:
-            roleId !==
-            null,
-
-          detail:
-            roleId ??
-            `checkedRoles=${roleRows.length}`,
-        });
-
-        const failed =
-          checks.filter(
-            (check) =>
-              !check.ok,
-          );
-
         if (
-          failed.length >
-            0 ||
+          hasFailedChecks(
+            checks,
+          ) ||
           !roleId ||
           !pending
         ) {

@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://traceforge.dev/schemas/custody-operation-provenance.schema.json",
+  "title": "TraceForge Custody Operation Provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "complete",
+    "network",
+    "contract",
+    "entity",
+    "custody",
+    "transactions",
+    "verification"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chainId"
+      ],
+      "properties": {
+        "chainId": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/address"
+        },
+        "runtimeBytecodeHash": {
+          "$ref": "#/$defs/bytes32"
+        }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entityId"
+      ],
+      "properties": {
+        "entityId": {
+          "$ref": "#/$defs/bytes32"
+        }
+      }
+    },
+    "custody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fromOrganizationId",
+        "toOrganizationId",
+        "proposal"
+      ],
+      "properties": {
+        "fromOrganizationId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "toOrganizationId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "proposal": {
+          "$ref": "#/$defs/custodyEvidence"
+        },
+        "acceptance": {
+          "$ref": "#/$defs/custodyEvidence"
+        }
+      }
+    },
+    "apiWrite": {
+      "$ref": "#/$defs/apiWrite"
+    },
+    "apiWrites": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "$ref": "#/$defs/apiWrite"
+        },
+        "acceptance": {
+          "$ref": "#/$defs/apiWrite"
+        }
+      }
+    },
+    "transactions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proposal"
+      ],
+      "properties": {
+        "proposal": {
+          "$ref": "#/$defs/transaction"
+        },
+        "acceptance": {
+          "$ref": "#/$defs/transaction"
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "complete": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "custody": {
+            "required": [
+              "acceptance"
+            ]
+          },
+          "transactions": {
+            "required": [
+              "acceptance"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "bytes32": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "txHash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "decimalString": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "custodyEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventType",
+        "evidenceHash"
+      ],
+      "properties": {
+        "eventType": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "evidenceHash": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "proposedAt": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "acceptedAt": {
+          "$ref": "#/$defs/decimalString"
+        }
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash",
+        "blockNumber",
+        "gasUsed"
+      ],
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/txHash"
+        },
+        "blockNumber": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "gasUsed": {
+          "$ref": "#/$defs/decimalString"
+        }
+      }
+    },
+    "apiWrite": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128
+        },
+        "signerAddress": {
+          "$ref": "#/$defs/address"
+        },
+        "roleId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "nonce": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "gasEstimate": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "gasLimit": {
+          "$ref": "#/$defs/decimalString"
+        }
+      }
+    }
+  }
+}

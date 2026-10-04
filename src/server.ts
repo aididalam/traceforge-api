@@ -301,7 +301,7 @@ await app.register(
           "Tenant-scoped HTTP API over the TraceForge indexed MySQL read model.",
 
         version:
-          "0.12.0",
+          "0.13.0",
       },
     },
   },

@@ -456,45 +456,57 @@ custodian is the authenticated recipient organization.
 
 No acceptance transaction should be sent until the separate immutable-write
 checkpoint is reviewed.
-## API v0.12 — controlled custody acceptance broadcast
 
-v0.12 adds:
+## API v0.13 — shared write safety and organization-aware preflight
 
-```text
-POST /v1/tenants/:tenantId/entities/:entityId/custody/acceptances/broadcast
-```
+v0.13 consolidates the live-chain authorization checks used by write preflight,
+custody simulations, and custody broadcasts.
 
-The endpoint remains protected by the global server gate:
+`src/write-safety.ts` is now the shared authority for:
+
+- chain ID verification;
+- deployed contract presence;
+- exact runtime bytecode hash verification;
+- tenant and organization existence/activity;
+- tenant membership;
+- mapped signer wallet-to-organization binding;
+- live role/capability authorization;
+- recipient organization and membership checks for custody proposals.
+
+`GET /v1/auth/preflight` now resolves the signer from the authenticated
+organization using the same organization-to-signer map as write routes. It no
+longer assumes the legacy global signer address. This means Distributor and
+Producer principals can be preflighted independently without changing process
+configuration.
+
+`TRACEFORGE_RUNTIME_BYTECODE_HASH` is parsed once through API configuration and
+must be a valid bytes32 value when present. All write safety checks consume that
+normalized configuration value.
+
+Broadcast behavior is unchanged:
 
 ```text
 TRACEFORGE_BROADCAST_ENABLED=false
 ```
 
-It requires:
+remains the safe default, and v0.13 introduces no new chain mutation.
 
-- an organization-bound `chain:write` token;
-- an organization-aware mapped signer;
-- a valid `Idempotency-Key`;
-- `confirm: "BROADCAST"`;
-- chain ID 9009;
-- exact deployed runtime bytecode hash;
-- active tenant / organization / membership;
-- live wallet-to-organization binding;
-- an open entity;
-- an existing pending custody transfer;
-- the authenticated organization must be the pending recipient;
-- the pending source must still equal the current custodian;
-- a live `CUSTODY_TRANSFER` capability;
-- exact `acceptCustodyTransfer` simulation;
-- gas estimation and 20% gas-limit buffer.
+### Custody provenance schema
 
-The signed transaction is journaled in `chain_write_operations` before node
-submission. The route supports same-key recovery for PREPARED/BROADCAST writes.
+`schemas/custody-operation-provenance.schema.json` documents schema version 1
+for custody-operation provenance artifacts. It supports both proposal-only
+(`complete: false`) and completed proposal/acceptance flows.
 
-A successful receipt is accepted only if it contains both a matching
-`CustodyTransferred` event and matching `TraceRecorded`. It then requires live
-readback proving the pending transfer is cleared and the entity's current
-custodian is the authenticated recipient organization.
+Validate custody provenance artifacts from the umbrella checkout with:
 
-No acceptance transaction should be sent until the separate immutable-write
-checkpoint is reviewed.
+```bash
+npm run provenance:validate
+```
+
+The validator defaults to:
+
+```text
+../contracts/deployments/9009/operations
+```
+
+and can also receive one or more explicit JSON files or directories.

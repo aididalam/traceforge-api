@@ -70,6 +70,30 @@ function optionalAddress(
   );
 }
 
+function optionalBytes32(
+  name: string,
+  value: string | undefined,
+): string | null {
+  if (
+    value === undefined ||
+    value.length === 0
+  ) {
+    return null;
+  }
+
+  if (
+    !/^0x[0-9a-fA-F]{64}$/.test(
+      value,
+    )
+  ) {
+    throw new Error(
+      `Invalid bytes32 value for ${name}: ${value}`,
+    );
+  }
+
+  return value.toLowerCase();
+}
+
 export const config = {
   host:
     process.env.API_HOST ??
@@ -100,8 +124,10 @@ export const config = {
       ),
 
     runtimeBytecodeHash:
-      process.env.TRACEFORGE_RUNTIME_BYTECODE_HASH ??
-      null,
+      optionalBytes32(
+        "TRACEFORGE_RUNTIME_BYTECODE_HASH",
+        process.env.TRACEFORGE_RUNTIME_BYTECODE_HASH,
+      ),
 
     rpcUrl:
       process.env.TRACEFORGE_RPC_URL ??

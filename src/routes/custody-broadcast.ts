@@ -18,7 +18,6 @@ import {
 } from "viem";
 
 import type {
-  Address,
   Hex,
 } from "viem";
 
@@ -43,19 +42,22 @@ import {
 } from "../db.js";
 
 import {
-  runtimeBytecodeIntegrity,
-} from "../runtime-integrity.js";
-
-import {
   loadOrganizationAccount,
 } from "../signer.js";
 
 import {
+  appendRecipientSafetyChecks,
+  evaluateWritePrincipalSafety,
+  hasFailedChecks,
+} from "../write-safety.js";
+
+import type {
+  WriteCheck,
+} from "../write-safety.js";
+
+import {
   traceForgeWriteAbi,
 } from "../traceforge-write-abi.js";
-
-const custodyTransferCapability =
-  4;
 
 const operationName =
   "proposeCustodyTransfer";
@@ -70,11 +72,6 @@ interface Body {
   eventType: string;
   evidenceHash: string;
   confirm: string;
-}
-
-interface RoleRow
-  extends RowDataPacket {
-  role_id: string;
 }
 
 interface OperationRow
@@ -113,12 +110,6 @@ interface OperationRow
   error_message:
     | string
     | null;
-}
-
-interface Check {
-  name: string;
-  ok: boolean;
-  detail?: string;
 }
 
 function apiError(
@@ -908,141 +899,58 @@ export async function registerCustodyBroadcastRoutes(
         );
       }
 
-      const account =
-        await loadOrganizationAccount(auth.organizationId);
+      let account;
 
-      const checks: Check[] =
+      try {
+        account =
+          await loadOrganizationAccount(
+            auth.organizationId,
+          );
+      } catch (
+        error
+      ) {
+        request.log.error(
+          error,
+        );
+
+        reply.code(
+          503,
+        );
+
+        return apiError(
+          "signer_unavailable",
+          error instanceof Error
+            ? error.message
+            : "Signer is unavailable.",
+        );
+      }
+
+      const checks: WriteCheck[] =
         [];
 
       try {
-        const chainId =
-          await chainClient.getChainId();
+        const principalSafety =
+          await evaluateWritePrincipalSafety({
+            tenantId,
 
-        checks.push({
-          name:
-            "chain_id",
-          ok:
-            chainId ===
-            config.traceforge.chainId,
-          detail:
-            `expected=${config.traceforge.chainId} actual=${chainId}`,
-        });
+            organizationId:
+              auth.organizationId,
 
-        const bytecode =
-          await chainClient.getBytecode({
-            address:
-              contractAddress,
+            account,
+
+            capabilityIndex:
+              4,
+
+            capabilityCheckName:
+              "custody_transfer_capability",
           });
 
-        checks.push({
-          name:
-            "contract_code",
-          ok:
-            Boolean(
-              bytecode &&
-              bytecode !==
-                "0x",
-            ),
-        });
+        checks.push(
+          ...principalSafety.checks,
+        );
 
-        const runtimeIntegrity =
-          runtimeBytecodeIntegrity(
-            bytecode,
-          );
-
-        checks.push({
-          name:
-            "runtime_bytecode_hash",
-          ok:
-            runtimeIntegrity.ok,
-          detail:
-            `expected=${runtimeIntegrity.expected} actual=${runtimeIntegrity.actual}`,
-        });
-
-        checks.push({
-          name:
-            "signer_integrity",
-          ok:
-            true,
-        });
-
-        const tenant =
-          await readTraceForge(
-            "getTenant",
-            [
-              asBytes32(
-                tenantId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "tenant_active",
-          ok:
-            tenant.exists &&
-            tenant.active,
-        });
-
-        const organization =
-          await readTraceForge(
-            "getOrganization",
-            [
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "organization_active",
-          ok:
-            organization.exists &&
-            organization.active,
-        });
-
-        const activeWallet =
-          await readTraceForge(
-            "isActiveWalletForOrganization",
-            [
-              account.address as Address,
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "signer_wallet_binding",
-          ok:
-            Boolean(
-              activeWallet,
-            ),
-        });
-
-        const membership =
-          await readTraceForge(
-            "isActiveTenantMember",
-            [
-              asBytes32(
-                tenantId,
-              ),
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "tenant_membership",
-          ok:
-            Boolean(
-              membership,
-            ),
-        });
+        const roleId =
+          principalSafety.roleId;
 
         const entity =
           await readTraceForge(
@@ -1060,6 +968,7 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "entity_exists",
+
           ok:
             entity.exists,
         });
@@ -1067,6 +976,7 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "entity_open",
+
           ok:
             entity.exists &&
             !entity.closed,
@@ -1075,12 +985,12 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "current_custody",
+
           ok:
             entity.exists &&
-            same(
-              entity.currentCustodian,
-              auth.organizationId,
-            ),
+            entity.currentCustodian.toLowerCase() ===
+              auth.organizationId.toLowerCase(),
+
           detail:
             entity.currentCustodian,
         });
@@ -1101,130 +1011,30 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "pending_custody_absent",
+
           ok:
             !pendingExists,
         });
 
-        const recipient =
-          await readTraceForge(
-            "getOrganization",
-            [
-              asBytes32(
-                toOrganizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "recipient_organization_active",
-          ok:
-            recipient.exists &&
-            recipient.active,
-        });
-
-        const recipientMembership =
-          await readTraceForge(
-            "isActiveTenantMember",
-            [
-              asBytes32(
-                tenantId,
-              ),
-              asBytes32(
-                toOrganizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "recipient_tenant_membership",
-          ok:
-            Boolean(
-              recipientMembership,
-            ),
+        await appendRecipientSafetyChecks({
+          tenantId,
+          toOrganizationId,
+          checks,
         });
 
         checks.push({
           name:
             "recipient_differs_from_custodian",
+
           ok:
-            !same(
-              toOrganizationId,
-              auth.organizationId,
-            ),
+            toOrganizationId.toLowerCase() !==
+            auth.organizationId.toLowerCase(),
         });
-
-        const [roleRows] =
-          await db.query<
-            RoleRow[]
-          >(
-            `
-              SELECT role_id
-              FROM organization_roles
-              WHERE tenant_id = ?
-                AND organization_id = ?
-                AND active = TRUE
-              ORDER BY role_id
-            `,
-            [
-              tenantId.toLowerCase(),
-              auth.organizationId,
-            ],
-          );
-
-        let roleId:
-          string | null =
-            null;
-
-        for (
-          const role of roleRows
-        ) {
-          const allowed =
-            await readTraceForge(
-              "hasCapability",
-              [
-                asBytes32(
-                  tenantId,
-                ),
-                account.address as Address,
-                asBytes32(
-                  role.role_id,
-                ),
-                custodyTransferCapability,
-              ],
-            );
-
-          if (
-            allowed
-          ) {
-            roleId =
-              role.role_id;
-
-            break;
-          }
-        }
-
-        checks.push({
-          name:
-            "custody_transfer_capability",
-          ok:
-            roleId !==
-            null,
-          detail:
-            roleId ??
-            `checkedRoles=${roleRows.length}`,
-        });
-
-        const failed =
-          checks.filter(
-            (check) =>
-              !check.ok,
-          );
 
         if (
-          failed.length >
-          0 ||
+          hasFailedChecks(
+            checks,
+          ) ||
           !roleId
         ) {
           reply.code(

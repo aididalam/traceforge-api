@@ -45,6 +45,28 @@ const writerToken =
     "utf8",
   ).trim();
 
+const producerWriterTokenFile =
+  process.env.TRACEFORGE_PRODUCER_WRITER_TOKEN_FILE ??
+  resolve(
+    homedir(),
+    ".traceforge/secrets/api-sandbox-producer-writer.token",
+  );
+
+const producerWriterToken =
+  process.env.TRACEFORGE_PRODUCER_WRITER_TOKEN ??
+  readLocalFile(
+    producerWriterTokenFile,
+    "utf8",
+  ).trim();
+
+const producerWalletAddress =
+  process.env.TRACEFORGE_TEST_PRODUCER_WALLET ??
+  "0xA3f42A848A3A5675E959426e3c7258d0C7f0C019";
+
+const producerRoleId =
+  process.env.TRACEFORGE_TEST_PRODUCER_ROLE_ID ??
+  "0xede905a271a8865b215f3d2d41a77155680c369834a15a16af84bc0d2cb60a26";
+
 const distributorOrganizationId =
   process.env.TRACEFORGE_TEST_DISTRIBUTOR_ORG_ID ??
   "0x6d143f0625d0664c5d27b4a6e17141c05dc24eac70cd8a20552f620264b40f5f";
@@ -845,6 +867,73 @@ test(
     );
   },
 );
+
+test(
+  "organization-aware preflight selects the producer signer",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await getJson(
+        "/v1/auth/preflight?capability=CUSTODY_TRANSFER",
+        {
+          token:
+            producerWriterToken,
+        },
+      );
+
+    assert.equal(
+      response.status,
+      200,
+    );
+
+    assert.equal(
+      body.ready,
+      true,
+    );
+
+    assert.equal(
+      body.organizationId?.toLowerCase(),
+      producerOrganizationId.toLowerCase(),
+    );
+
+    assert.equal(
+      body.signerAddress?.toLowerCase(),
+      producerWalletAddress.toLowerCase(),
+    );
+
+    assert.equal(
+      body.authorizedRoleId?.toLowerCase(),
+      producerRoleId.toLowerCase(),
+    );
+
+    const runtimeHash =
+      body.checks.find(
+        (check) =>
+          check.name ===
+          "runtime_bytecode_hash",
+      );
+
+    assert.equal(
+      runtimeHash?.ok,
+      true,
+    );
+
+    const signerBinding =
+      body.checks.find(
+        (check) =>
+          check.name ===
+          "signer_wallet_binding",
+      );
+
+    assert.equal(
+      signerBinding?.ok,
+      true,
+    );
+  },
+);
+
 test(
   "read-only token is rejected by chain write preflight",
   async () => {

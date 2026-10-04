@@ -315,33 +315,3 @@ export async function loadOrganizationAccount(
     keyFile,
   );
 }
-
-export async function loadSimulationAccount():
-Promise<PrivateKeyAccount> {
-  const configuredAddress =
-    config.traceforge.signerAddress;
-
-  const keyFile =
-    config.traceforge.signerKeyFile;
-
-  if (
-    !configuredAddress
-  ) {
-    throw new Error(
-      "TRACEFORGE_SIGNER_ADDRESS is not configured.",
-    );
-  }
-
-  if (
-    !keyFile
-  ) {
-    throw new Error(
-      "TRACEFORGE_SIGNER_KEY_FILE is not configured.",
-    );
-  }
-
-  return loadAccount(
-    configuredAddress,
-    keyFile,
-  );
-}

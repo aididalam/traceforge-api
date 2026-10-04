@@ -6,20 +6,21 @@ import type {
   Hex,
 } from "viem";
 
+import {
+  config,
+} from "./config.js";
+
 export function runtimeBytecodeIntegrity(
   bytecode: Hex | undefined,
 ) {
   const expected =
-    process.env.TRACEFORGE_RUNTIME_BYTECODE_HASH;
+    config.traceforge.runtimeBytecodeHash;
 
   if (
-    !expected ||
-    !/^0x[0-9a-fA-F]{64}$/.test(
-      expected,
-    )
+    !expected
   ) {
     throw new Error(
-      "TRACEFORGE_RUNTIME_BYTECODE_HASH must be configured as a bytes32 hash.",
+      "TRACEFORGE_RUNTIME_BYTECODE_HASH is not configured.",
     );
   }
 
@@ -31,8 +32,7 @@ export function runtimeBytecodeIntegrity(
       ok:
         false,
 
-      expected:
-        expected.toLowerCase(),
+      expected,
 
       actual:
         null,
@@ -42,17 +42,15 @@ export function runtimeBytecodeIntegrity(
   const actual =
     keccak256(
       bytecode,
-    );
+    ).toLowerCase();
 
   return {
     ok:
-      actual.toLowerCase() ===
-      expected.toLowerCase(),
+      actual ===
+      expected,
 
-    expected:
-      expected.toLowerCase(),
+    expected,
 
-    actual:
-      actual.toLowerCase(),
+    actual,
   };
 }

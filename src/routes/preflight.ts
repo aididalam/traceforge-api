@@ -3,11 +3,6 @@ import type {
 } from "fastify";
 
 import type {
-  RowDataPacket,
-} from "mysql2";
-
-import type {
-  Address,
   Hex,
 } from "viem";
 
@@ -18,18 +13,20 @@ import {
 
 import {
   asBytes32,
-  chainClient,
-  contractAddress,
   readTraceForge,
 } from "../chain.js";
 
 import {
-  config,
-} from "../config.js";
+  loadOrganizationAccount,
+} from "../signer.js";
 
 import {
-  db,
-} from "../db.js";
+  evaluateWritePrincipalSafety,
+} from "../write-safety.js";
+
+import type {
+  WriteCheck,
+} from "../write-safety.js";
 
 const capabilityIndexes = {
   ENTITY_CREATE: 0,
@@ -54,17 +51,6 @@ interface Query {
   entityId?: string;
   requireCustody?: string;
   pendingCustody?: string;
-}
-
-interface RoleRow
-  extends RowDataPacket {
-  role_id: string;
-}
-
-interface Check {
-  name: string;
-  ok: boolean;
-  detail?: string;
 }
 
 function apiError(
@@ -305,263 +291,103 @@ export async function registerPreflightRoutes(
         );
       }
 
-      const checks: Check[] =
+      const checks: WriteCheck[] =
         [];
 
-      const signerAddress =
-        config.traceforge.signerAddress;
+      let account;
 
-      if (
-        !signerAddress
-      ) {
+      try {
+        account =
+          await loadOrganizationAccount(
+            auth.organizationId,
+          );
+
         checks.push({
           name:
             "signer_configured",
+
+          ok:
+            true,
+
+          detail:
+            account.address,
+        });
+      } catch (
+        error
+      ) {
+        request.log.error(
+          error,
+        );
+
+        checks.push({
+          name:
+            "signer_configured",
+
           ok:
             false,
+
           detail:
-            "TRACEFORGE_SIGNER_ADDRESS is not configured.",
+            error instanceof Error
+              ? error.message
+              : "Signer is unavailable.",
         });
 
         return {
           ready:
             false,
+
           capability,
+
           capabilityIndex:
             capabilityIndexes[
               capability
             ],
+
           tenantId:
             auth.tenantId,
+
           organizationId:
             auth.organizationId,
+
           signerAddress:
             null,
+
           authorizedRoleId:
             null,
+
           checks,
         };
       }
 
+      const signerAddress =
+        account.address;
+
       try {
-        const chainId =
-          await chainClient.getChainId();
+        const principalSafety =
+          await evaluateWritePrincipalSafety({
+            tenantId:
+              auth.tenantId,
 
-        checks.push({
-          name:
-            "chain_id",
-          ok:
-            chainId ===
-            config.traceforge.chainId,
-          detail:
-            `expected=${config.traceforge.chainId} actual=${chainId}`,
-        });
+            organizationId:
+              auth.organizationId,
 
-        const bytecode =
-          await chainClient.getBytecode({
-            address:
-              contractAddress,
+            account,
+
+            capabilityIndex:
+              capabilityIndexes[
+                capability
+              ],
+
+            capabilityCheckName:
+              "required_capability",
           });
 
-        checks.push({
-          name:
-            "contract_code",
-          ok:
-            Boolean(
-              bytecode &&
-              bytecode !==
-                "0x",
-            ),
-          detail:
-            contractAddress,
-        });
+        checks.push(
+          ...principalSafety.checks,
+        );
 
-        const tenant =
-          await readTraceForge(
-            "getTenant",
-            [
-              asBytes32(
-                auth.tenantId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "tenant_exists",
-          ok:
-            tenant.exists,
-        });
-
-        checks.push({
-          name:
-            "tenant_active",
-          ok:
-            tenant.exists &&
-            tenant.active,
-        });
-
-        const organization =
-          await readTraceForge(
-            "getOrganization",
-            [
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "organization_exists",
-          ok:
-            organization.exists,
-        });
-
-        checks.push({
-          name:
-            "organization_active",
-          ok:
-            organization.exists &&
-            organization.active,
-        });
-
-        const membership =
-          await readTraceForge(
-            "getTenantMembership",
-            [
-              asBytes32(
-                auth.tenantId,
-              ),
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        const activeMember =
-          await readTraceForge(
-            "isActiveTenantMember",
-            [
-              asBytes32(
-                auth.tenantId,
-              ),
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "tenant_membership",
-          ok:
-            membership.exists &&
-            membership.active &&
-            activeMember,
-        });
-
-        const wallet =
-          await readTraceForge(
-            "getWalletBinding",
-            [
-              signerAddress as Address,
-            ],
-          );
-
-        const activeWallet =
-          await readTraceForge(
-            "isActiveWalletForOrganization",
-            [
-              signerAddress as Address,
-              asBytes32(
-                auth.organizationId,
-              ),
-            ],
-          );
-
-        const walletMatches =
-          wallet.organizationId.toLowerCase() ===
-          auth.organizationId.toLowerCase();
-
-        checks.push({
-          name:
-            "signer_wallet_binding",
-          ok:
-            walletMatches &&
-            wallet.active &&
-            activeWallet,
-          detail:
-            `walletOrganization=${wallet.organizationId}`,
-        });
-
-        const [roleRows] =
-          await db.query<
-            RoleRow[]
-          >(
-            `
-              SELECT role_id
-              FROM organization_roles
-              WHERE tenant_id = ?
-                AND organization_id = ?
-                AND active = TRUE
-              ORDER BY role_id
-            `,
-            [
-              auth.tenantId,
-              auth.organizationId,
-            ],
-          );
-
-        let authorizedRoleId:
-          string | null =
-            null;
-
-        for (
-          const role of roleRows
-        ) {
-          try {
-            const allowed =
-              await readTraceForge(
-                "hasCapability",
-                [
-                  asBytes32(
-                    auth.tenantId,
-                  ),
-                  signerAddress as Address,
-                  asBytes32(
-                    role.role_id,
-                  ),
-                  capabilityIndexes[
-                    capability
-                  ],
-                ],
-              );
-
-            if (
-              allowed
-            ) {
-              authorizedRoleId =
-                role.role_id;
-
-              break;
-            }
-          } catch {
-            // A stale indexed role candidate is not authorization.
-          }
-        }
-
-        checks.push({
-          name:
-            "required_capability",
-          ok:
-            authorizedRoleId !==
-            null,
-          detail:
-            authorizedRoleId
-              ? `roleId=${authorizedRoleId}`
-              : `checkedRoles=${roleRows.length}`,
-        });
+        const authorizedRoleId =
+          principalSafety.roleId;
 
         let entity:
           any =
