@@ -707,3 +707,19 @@ TRACEFORGE_BROADCAST_ENABLED=false
 
 until an operation-specific evidence document, simulation, state checkpoint,
 and immutable-write review are complete.
+
+## API v0.17 — generic public provenance v1
+
+v0.17 formalizes public provenance for the generic write engine. The API repo
+now contains `schemas/generic-operation-provenance.schema.json` and a strict
+validator for completed `createEntity`, `recordTrace`, state, metadata, link,
+link-status, and close operations.
+
+`npm run provenance:validate` validates both custody and generic provenance.
+`npm run verify:provenance-schema` additionally proves that the validator
+accepts the completed generic `recordTrace` proof while rejecting a serialized
+transaction leak, missing trace evidence, and inconsistent document-resolution
+counts.
+
+The public provenance contract and secret boundary are documented in
+`docs/provenance-v1.md`.

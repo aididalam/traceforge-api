@@ -1,0 +1,527 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://traceforge.dev/schemas/generic-operation-provenance.schema.json",
+  "title": "TraceForge Generic Operation Provenance",
+  "description": "Public, secret-free provenance for a completed non-custody TraceForge API write.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "complete",
+    "network",
+    "contract",
+    "entity",
+    "operation",
+    "apiWrite",
+    "transaction",
+    "verification"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "complete": {
+      "const": true
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chainId"
+      ],
+      "properties": {
+        "chainId": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "runtimeBytecodeHash"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/address"
+        },
+        "runtimeBytecodeHash": {
+          "$ref": "#/$defs/bytes32"
+        }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entityId",
+        "organizationId",
+        "roleId",
+        "signerAddress"
+      ],
+      "properties": {
+        "entityId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "organizationId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "roleId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "signerAddress": {
+          "$ref": "#/$defs/address"
+        }
+      }
+    },
+    "operation": {
+      "$ref": "#/$defs/operation"
+    },
+    "apiWrite": {
+      "$ref": "#/$defs/apiWrite"
+    },
+    "transaction": {
+      "$ref": "#/$defs/transaction"
+    },
+    "indexedEvent": {
+      "$ref": "#/$defs/indexedEvent"
+    },
+    "indexedEvents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/indexedEvent"
+      }
+    },
+    "verification": {
+      "$ref": "#/$defs/verification"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "indexedEvent"
+      ],
+      "not": {
+        "required": [
+          "indexedEvents"
+        ]
+      }
+    },
+    {
+      "required": [
+        "indexedEvents"
+      ],
+      "not": {
+        "required": [
+          "indexedEvent"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "bytes32": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "decimalString": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "createEntity",
+            "recordTrace",
+            "updateEntityState",
+            "updateEntityMetadata",
+            "createEntityLink",
+            "setEntityLinkActive",
+            "closeEntity"
+          ]
+        },
+        "eventType": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "evidenceHash": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "evidenceFile": {
+          "type": "string",
+          "pattern": "^bootstrap/[A-Za-z0-9._/-]+\\.json$"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "entityType": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "metadataHash": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "initialState": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "newState": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "newMetadataHash": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "targetEntityId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "linkType": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "active": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "createEntity"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "entityType",
+              "metadataHash",
+              "initialState"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "recordTrace"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "eventType",
+              "evidenceHash"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "updateEntityState"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "eventType",
+              "evidenceHash",
+              "newState"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "updateEntityMetadata"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "eventType",
+              "evidenceHash",
+              "newMetadataHash"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "createEntityLink"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "eventType",
+              "evidenceHash",
+              "targetEntityId",
+              "linkType"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "setEntityLinkActive"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "eventType",
+              "evidenceHash",
+              "targetEntityId",
+              "linkType",
+              "active"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "closeEntity"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "eventType",
+              "evidenceHash"
+            ]
+          }
+        }
+      ]
+    },
+    "apiWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "idempotencyKey",
+        "nonce",
+        "gasEstimate",
+        "gasLimit",
+        "status"
+      ],
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128
+        },
+        "nonce": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "gasEstimate": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "gasLimit": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "status": {
+          "const": "CONFIRMED"
+        }
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash",
+        "blockNumber",
+        "gasUsed",
+        "receiptStatus",
+        "logCount"
+      ],
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "blockNumber": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "gasUsed": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "receiptStatus": {
+          "const": "success"
+        },
+        "logCount": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "indexedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventId",
+        "eventName",
+        "logIndex"
+      ],
+      "properties": {
+        "eventId": {
+          "$ref": "#/$defs/decimalString"
+        },
+        "eventName": {
+          "enum": [
+            "EntityCreated",
+            "TraceRecorded",
+            "EntityLinkCreated",
+            "EntityLinkStatusChanged",
+            "EntityClosed"
+          ]
+        },
+        "logIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stateAfter": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "metadataHashAfter": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "linkId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "active": {
+          "type": "boolean"
+        }
+      }
+    },
+    "resolutionCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resolved",
+        "total",
+        "unresolved"
+      ],
+      "properties": {
+        "resolved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "receiptConfirmed",
+        "journalConfirmed",
+        "serializedTransactionCleared",
+        "indexerReconciled",
+        "broadcastDisabledAfterWrite"
+      ],
+      "properties": {
+        "receiptConfirmed": {
+          "const": true
+        },
+        "journalConfirmed": {
+          "const": true
+        },
+        "serializedTransactionCleared": {
+          "const": true
+        },
+        "indexerReconciled": {
+          "const": true
+        },
+        "broadcastDisabledAfterWrite": {
+          "const": true
+        },
+        "traceEvidenceResolved": {
+          "type": "boolean"
+        },
+        "traceMetadataResolved": {
+          "type": "boolean"
+        },
+        "traceResolution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "metadata": {
+              "$ref": "#/$defs/resolutionCount"
+            },
+            "evidence": {
+              "$ref": "#/$defs/resolutionCount"
+            }
+          }
+        },
+        "stateUnchanged": {
+          "type": "boolean"
+        },
+        "metadataUnchanged": {
+          "type": "boolean"
+        },
+        "custodyUnchanged": {
+          "type": "boolean"
+        },
+        "entityRemainsOpen": {
+          "type": "boolean"
+        },
+        "stateUpdated": {
+          "type": "boolean"
+        },
+        "metadataUpdated": {
+          "type": "boolean"
+        },
+        "entityClosed": {
+          "type": "boolean"
+        },
+        "entityCreated": {
+          "type": "boolean"
+        },
+        "linkCreated": {
+          "type": "boolean"
+        },
+        "linkStatusUpdated": {
+          "type": "boolean"
+        },
+        "finalState": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "finalMetadataHash": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "finalCustodianOrganizationId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "finalLinkId": {
+          "$ref": "#/$defs/bytes32"
+        },
+        "finalLinkActive": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
