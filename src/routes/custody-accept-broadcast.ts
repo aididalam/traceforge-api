@@ -58,7 +58,7 @@ const custodyTransferCapability =
   4;
 
 const operationName =
-  "proposeCustodyTransfer";
+  "acceptCustodyTransfer";
 
 interface Params {
   tenantId: string;
@@ -66,7 +66,6 @@ interface Params {
 }
 
 interface Body {
-  toOrganizationId: string;
   eventType: string;
   evidenceHash: string;
   confirm: string;
@@ -82,34 +81,44 @@ interface OperationRow
   operation_id: string;
   idempotency_key: string;
   request_hash: string;
+
   token_id: string;
   tenant_id: string;
   organization_id: string;
   entity_id: string;
+
   operation_name: string;
   role_id: string;
+
   status: string;
   transaction_hash: string;
+
   serialized_transaction:
     | string
     | null;
+
   nonce: string | number;
   gas_estimate: string | number;
   gas_limit: string | number;
+
   block_number:
     | string
     | number
     | null;
+
   gas_used:
     | string
     | number
     | null;
+
   request_json:
     | string
     | Record<string, unknown>;
+
   error_code:
     | string
     | null;
+
   error_message:
     | string
     | null;
@@ -264,8 +273,10 @@ function decodedEvents(
         decodeEventLog({
           abi:
             traceForgeWriteAbi,
+
           data:
             log.data,
+
           topics:
             log.topics,
         });
@@ -273,6 +284,7 @@ function decodedEvents(
       decoded.push({
         eventName:
           event.eventName,
+
         args:
           event.args,
       });
@@ -308,6 +320,7 @@ async function finalizeReceipt(
           status = 'FAILED',
           block_number = ?,
           gas_used = ?,
+          serialized_transaction = NULL,
           error_code =
             'transaction_reverted',
           error_message =
@@ -322,7 +335,7 @@ async function finalizeReceipt(
     );
 
     throw new Error(
-      "Broadcast transaction reverted.",
+      "Custody acceptance transaction reverted.",
     );
   }
 
@@ -336,35 +349,47 @@ async function finalizeReceipt(
       receipt.logs,
     );
 
-  const proposal =
+  const transfer =
     events.find(
       (event) =>
         event.eventName ===
-          "CustodyTransferProposed" &&
+          "CustodyTransferred" &&
+
         same(
           event.args.tenantId,
           operation.tenant_id,
         ) &&
+
         same(
           event.args.entityId,
           operation.entity_id,
         ) &&
+
         same(
           event.args.fromOrganizationId,
-          operation.organization_id,
+          requestBody.expectedFromOrganizationId,
         ) &&
+
         same(
           event.args.toOrganizationId,
-          requestBody.toOrganizationId,
+          operation.organization_id,
         ) &&
+
         same(
           event.args.roleId,
           operation.role_id,
         ) &&
+
+        same(
+          event.args.actor,
+          requestBody.signerAddress,
+        ) &&
+
         same(
           event.args.eventType,
           requestBody.eventType,
         ) &&
+
         same(
           event.args.evidenceHash,
           requestBody.evidenceHash,
@@ -376,26 +401,37 @@ async function finalizeReceipt(
       (event) =>
         event.eventName ===
           "TraceRecorded" &&
+
         same(
           event.args.tenantId,
           operation.tenant_id,
         ) &&
+
         same(
           event.args.entityId,
           operation.entity_id,
         ) &&
+
         same(
           event.args.organizationId,
           operation.organization_id,
         ) &&
+
         same(
           event.args.roleId,
           operation.role_id,
         ) &&
+
+        same(
+          event.args.actor,
+          requestBody.signerAddress,
+        ) &&
+
         same(
           event.args.eventType,
           requestBody.eventType,
         ) &&
+
         same(
           event.args.evidenceHash,
           requestBody.evidenceHash,
@@ -403,7 +439,7 @@ async function finalizeReceipt(
     );
 
   if (
-    !proposal ||
+    !transfer ||
     !trace
   ) {
     await db.query(
@@ -413,10 +449,11 @@ async function finalizeReceipt(
           status = 'FAILED',
           block_number = ?,
           gas_used = ?,
+          serialized_transaction = NULL,
           error_code =
             'receipt_event_mismatch',
           error_message =
-            'Expected custody/trace events were not found in the successful receipt.'
+            'Expected custody transfer/trace events were not found in the successful receipt.'
         WHERE operation_id = ?
       `,
       [
@@ -427,7 +464,7 @@ async function finalizeReceipt(
     );
 
     throw new Error(
-      "Successful transaction did not contain the expected custody events.",
+      "Successful transaction did not contain the expected custody acceptance events.",
     );
   }
 
@@ -445,16 +482,16 @@ async function finalizeReceipt(
     );
 
   if (
-    !pendingExists
+    pendingExists
   ) {
     throw new Error(
-      "Receipt succeeded but pending custody transfer is absent during readback.",
+      "Receipt succeeded but the pending custody transfer still exists.",
     );
   }
 
-  const pending =
+  const entity =
     await readTraceForge(
-      "getPendingCustodyTransfer",
+      "getEntity",
       [
         asBytes32(
           operation.tenant_id,
@@ -466,17 +503,15 @@ async function finalizeReceipt(
     );
 
   if (
+    !entity.exists ||
+    entity.closed ||
     !same(
-      pending.fromOrganizationId,
+      entity.currentCustodian,
       operation.organization_id,
-    ) ||
-    !same(
-      pending.toOrganizationId,
-      requestBody.toOrganizationId,
     )
   ) {
     throw new Error(
-      "Pending custody readback does not match the broadcast request.",
+      "Custody acceptance readback does not match the expected recipient state.",
     );
   }
 
@@ -514,21 +549,18 @@ async function finalizeReceipt(
 
     pendingCustody: {
       exists:
-        true,
+        false,
+    },
 
-      fromOrganizationId:
-        pending.fromOrganizationId,
+    entity: {
+      exists:
+        entity.exists,
 
-      toOrganizationId:
-        pending.toOrganizationId,
+      closed:
+        entity.closed,
 
-      proposedBy:
-        pending.proposedBy,
-
-      proposedAt:
-        String(
-          pending.proposedAt,
-        ),
+      currentCustodian:
+        entity.currentCustodian,
     },
   };
 }
@@ -562,14 +594,14 @@ async function existingOperation(
     null;
 }
 
-export async function registerCustodyBroadcastRoutes(
+export async function registerCustodyAcceptanceBroadcastRoutes(
   app: FastifyInstance,
 ) {
   app.post<{
     Params: Params;
     Body: Body;
   }>(
-    "/v1/tenants/:tenantId/entities/:entityId/custody/proposals/broadcast",
+    "/v1/tenants/:tenantId/entities/:entityId/custody/acceptances/broadcast",
     {
       schema: {
         tags: [
@@ -589,8 +621,10 @@ export async function registerCustodyBroadcastRoutes(
             "idempotency-key": {
               type:
                 "string",
+
               minLength:
                 8,
+
               maxLength:
                 128,
             },
@@ -610,6 +644,7 @@ export async function registerCustodyBroadcastRoutes(
             tenantId: {
               type:
                 "string",
+
               pattern:
                 "^0x[0-9a-fA-F]{64}$",
             },
@@ -617,6 +652,7 @@ export async function registerCustodyBroadcastRoutes(
             entityId: {
               type:
                 "string",
+
               pattern:
                 "^0x[0-9a-fA-F]{64}$",
             },
@@ -631,23 +667,16 @@ export async function registerCustodyBroadcastRoutes(
             false,
 
           required: [
-            "toOrganizationId",
             "eventType",
             "evidenceHash",
             "confirm",
           ],
 
           properties: {
-            toOrganizationId: {
-              type:
-                "string",
-              pattern:
-                "^0x[0-9a-fA-F]{64}$",
-            },
-
             eventType: {
               type:
                 "string",
+
               pattern:
                 "^0x[0-9a-fA-F]{64}$",
             },
@@ -655,6 +684,7 @@ export async function registerCustodyBroadcastRoutes(
             evidenceHash: {
               type:
                 "string",
+
               pattern:
                 "^0x[0-9a-fA-F]{64}$",
             },
@@ -662,6 +692,7 @@ export async function registerCustodyBroadcastRoutes(
             confirm: {
               type:
                 "string",
+
               const:
                 "BROADCAST",
             },
@@ -710,7 +741,7 @@ export async function registerCustodyBroadcastRoutes(
 
         return apiError(
           "organization_binding_required",
-          "Custody broadcast requires an organization-bound API token.",
+          "Custody acceptance broadcast requires an organization-bound API token.",
         );
       }
 
@@ -739,7 +770,6 @@ export async function registerCustodyBroadcastRoutes(
         request.params;
 
       const {
-        toOrganizationId,
         eventType,
         evidenceHash,
       } =
@@ -751,9 +781,6 @@ export async function registerCustodyBroadcastRoutes(
 
         entityId:
           entityId.toLowerCase(),
-
-        toOrganizationId:
-          toOrganizationId.toLowerCase(),
 
         eventType:
           eventType.toLowerCase(),
@@ -786,7 +813,7 @@ export async function registerCustodyBroadcastRoutes(
 
           return apiError(
             "idempotency_conflict",
-            "This Idempotency-Key was already used with a different request.",
+            "This Idempotency-Key was already used with a different custody acceptance request.",
           );
         }
 
@@ -843,7 +870,7 @@ export async function registerCustodyBroadcastRoutes(
                   existing.serialized_transaction as Hex,
               });
             } catch {
-              // It may already be in the node's pool or chain.
+              // It may already be in the node pool or chain.
             }
           }
 
@@ -876,7 +903,7 @@ export async function registerCustodyBroadcastRoutes(
               "broadcast_recovery_pending",
               error instanceof Error
                 ? error.message
-                : "Unable to recover the previous broadcast yet.",
+                : "Unable to recover the previous custody acceptance yet.",
 
               {
                 operationId:
@@ -896,7 +923,7 @@ export async function registerCustodyBroadcastRoutes(
         return apiError(
           "operation_failed",
           existing.error_message ??
-          "The previous operation failed.",
+          "The previous custody acceptance operation failed.",
 
           {
             operationId:
@@ -908,8 +935,31 @@ export async function registerCustodyBroadcastRoutes(
         );
       }
 
-      const account =
-        await loadOrganizationAccount(auth.organizationId);
+      let account;
+
+      try {
+        account =
+          await loadOrganizationAccount(
+            auth.organizationId,
+          );
+      } catch (
+        error
+      ) {
+        request.log.error(
+          error,
+        );
+
+        reply.code(
+          503,
+        );
+
+        return apiError(
+          "signer_unavailable",
+          error instanceof Error
+            ? error.message
+            : "Signer is unavailable.",
+        );
+      }
 
       const checks: Check[] =
         [];
@@ -921,9 +971,11 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "chain_id",
+
           ok:
             chainId ===
             config.traceforge.chainId,
+
           detail:
             `expected=${config.traceforge.chainId} actual=${chainId}`,
         });
@@ -937,11 +989,12 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "contract_code",
+
           ok:
             Boolean(
               bytecode &&
               bytecode !==
-                "0x",
+              "0x",
             ),
         });
 
@@ -953,17 +1006,12 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "runtime_bytecode_hash",
+
           ok:
             runtimeIntegrity.ok,
+
           detail:
             `expected=${runtimeIntegrity.expected} actual=${runtimeIntegrity.actual}`,
-        });
-
-        checks.push({
-          name:
-            "signer_integrity",
-          ok:
-            true,
         });
 
         const tenant =
@@ -979,6 +1027,7 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "tenant_active",
+
           ok:
             tenant.exists &&
             tenant.active,
@@ -997,6 +1046,7 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "organization_active",
+
           ok:
             organization.exists &&
             organization.active,
@@ -1016,10 +1066,14 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "signer_wallet_binding",
+
           ok:
             Boolean(
               activeWallet,
             ),
+
+          detail:
+            account.address,
         });
 
         const membership =
@@ -1038,6 +1092,7 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "tenant_membership",
+
           ok:
             Boolean(
               membership,
@@ -1060,6 +1115,7 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "entity_exists",
+
           ok:
             entity.exists,
         });
@@ -1067,22 +1123,10 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "entity_open",
+
           ok:
             entity.exists &&
             !entity.closed,
-        });
-
-        checks.push({
-          name:
-            "current_custody",
-          ok:
-            entity.exists &&
-            same(
-              entity.currentCustodian,
-              auth.organizationId,
-            ),
-          detail:
-            entity.currentCustodian,
         });
 
         const pendingExists =
@@ -1100,60 +1144,77 @@ export async function registerCustodyBroadcastRoutes(
 
         checks.push({
           name:
-            "pending_custody_absent",
-          ok:
-            !pendingExists,
-        });
+            "pending_custody_exists",
 
-        const recipient =
-          await readTraceForge(
-            "getOrganization",
-            [
-              asBytes32(
-                toOrganizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "recipient_organization_active",
-          ok:
-            recipient.exists &&
-            recipient.active,
-        });
-
-        const recipientMembership =
-          await readTraceForge(
-            "isActiveTenantMember",
-            [
-              asBytes32(
-                tenantId,
-              ),
-              asBytes32(
-                toOrganizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "recipient_tenant_membership",
           ok:
             Boolean(
-              recipientMembership,
+              pendingExists,
             ),
         });
 
-        checks.push({
-          name:
-            "recipient_differs_from_custodian",
-          ok:
-            !same(
-              toOrganizationId,
-              auth.organizationId,
-            ),
-        });
+        let pending: any =
+          null;
+
+        if (
+          pendingExists
+        ) {
+          pending =
+            await readTraceForge(
+              "getPendingCustodyTransfer",
+              [
+                asBytes32(
+                  tenantId,
+                ),
+                asBytes32(
+                  entityId,
+                ),
+              ],
+            );
+
+          checks.push({
+            name:
+              "pending_recipient",
+
+            ok:
+              same(
+                pending.toOrganizationId,
+                auth.organizationId,
+              ),
+
+            detail:
+              `toOrganizationId=${pending.toOrganizationId}`,
+          });
+
+          checks.push({
+            name:
+              "pending_source_matches_current_custody",
+
+            ok:
+              entity.exists &&
+              same(
+                pending.fromOrganizationId,
+                entity.currentCustodian,
+              ),
+
+            detail:
+              `from=${pending.fromOrganizationId} current=${entity.currentCustodian}`,
+          });
+
+          checks.push({
+            name:
+              "recipient_not_current_custodian",
+
+            ok:
+              entity.exists &&
+              !same(
+                auth.organizationId,
+                entity.currentCustodian,
+              ),
+
+            detail:
+              `currentCustodian=${entity.currentCustodian}`,
+          });
+        }
 
         const [roleRows] =
           await db.query<
@@ -1208,9 +1269,11 @@ export async function registerCustodyBroadcastRoutes(
         checks.push({
           name:
             "custody_transfer_capability",
+
           ok:
             roleId !==
             null,
+
           detail:
             roleId ??
             `checkedRoles=${roleRows.length}`,
@@ -1224,8 +1287,9 @@ export async function registerCustodyBroadcastRoutes(
 
         if (
           failed.length >
-          0 ||
-          !roleId
+            0 ||
+          !roleId ||
+          !pending
         ) {
           reply.code(
             409,
@@ -1241,6 +1305,17 @@ export async function registerCustodyBroadcastRoutes(
             operation:
               operationName,
 
+            tenantId,
+            entityId,
+
+            organizationId:
+              auth.organizationId,
+
+            signerAddress:
+              account.address,
+
+            roleId,
+
             checks,
 
             error: {
@@ -1248,7 +1323,7 @@ export async function registerCustodyBroadcastRoutes(
                 "preflight_failed",
 
               message:
-                "One or more live-chain preflight checks failed.",
+                "One or more live-chain custody acceptance checks failed.",
             },
           };
         }
@@ -1258,7 +1333,6 @@ export async function registerCustodyBroadcastRoutes(
             tenantId as Hex,
             roleId as Hex,
             entityId as Hex,
-            toOrganizationId as Hex,
             eventType as Hex,
             evidenceHash as Hex,
           ] as const;
@@ -1359,6 +1433,18 @@ export async function registerCustodyBroadcastRoutes(
         const operationId =
           randomUUID();
 
+        const operationRequest = {
+          ...canonicalRequest,
+
+          expectedFromOrganizationId:
+            String(
+              pending.fromOrganizationId,
+            ).toLowerCase(),
+
+          signerAddress:
+            account.address.toLowerCase(),
+        };
+
         await db.query(
           `
             INSERT INTO chain_write_operations (
@@ -1401,7 +1487,7 @@ export async function registerCustodyBroadcastRoutes(
             gasEstimate.toString(),
             gasLimit.toString(),
             JSON.stringify(
-              canonicalRequest,
+              operationRequest,
             ),
           ],
         );
@@ -1448,7 +1534,7 @@ export async function registerCustodyBroadcastRoutes(
             [
               error instanceof Error
                 ? error.message
-                : "Unknown broadcast submission error.",
+                : "Unknown custody acceptance submission error.",
               operationId,
             ],
           );
@@ -1467,7 +1553,7 @@ export async function registerCustodyBroadcastRoutes(
           !prepared
         ) {
           throw new Error(
-            "Prepared write operation could not be reloaded.",
+            "Prepared custody acceptance operation could not be reloaded.",
           );
         }
 
@@ -1499,9 +1585,14 @@ export async function registerCustodyBroadcastRoutes(
 
           roleId,
 
-          toOrganizationId,
           eventType,
           evidenceHash,
+
+          fromOrganizationId:
+            pending.fromOrganizationId,
+
+          toOrganizationId:
+            pending.toOrganizationId,
 
           gasEstimate:
             gasEstimate.toString(),
@@ -1533,7 +1624,7 @@ export async function registerCustodyBroadcastRoutes(
           "broadcast_failed",
           error instanceof Error
             ? error.message
-            : "Custody broadcast failed.",
+            : "Custody acceptance broadcast failed.",
 
           {
             checks,

@@ -1,6 +1,89 @@
 export const traceForgeWriteAbi = [
   {
     type:
+      "event",
+    name:
+      "CustodyTransferred",
+    anonymous:
+      false,
+    inputs: [
+      {
+        indexed:
+          true,
+        name:
+          "tenantId",
+        type:
+          "bytes32",
+      },
+      {
+        indexed:
+          true,
+        name:
+          "entityId",
+        type:
+          "bytes32",
+      },
+      {
+        indexed:
+          true,
+        name:
+          "fromOrganizationId",
+        type:
+          "bytes32",
+      },
+      {
+        indexed:
+          false,
+        name:
+          "toOrganizationId",
+        type:
+          "bytes32",
+      },
+      {
+        indexed:
+          false,
+        name:
+          "roleId",
+        type:
+          "bytes32",
+      },
+      {
+        indexed:
+          false,
+        name:
+          "actor",
+        type:
+          "address",
+      },
+      {
+        indexed:
+          false,
+        name:
+          "eventType",
+        type:
+          "bytes32",
+      },
+      {
+        indexed:
+          false,
+        name:
+          "evidenceHash",
+        type:
+          "bytes32",
+      },
+      {
+        indexed:
+          false,
+        name:
+          "acceptedAt",
+        type:
+          "uint64",
+      },
+    ],
+  },
+
+  {
+    type:
       "function",
     name:
       "acceptCustodyTransfer",

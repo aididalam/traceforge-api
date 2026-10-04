@@ -26,6 +26,7 @@ import { registerPreflightRoutes } from "./routes/preflight.js";
 import { registerCustodySimulationRoutes } from "./routes/custody-simulate.js";
 import { registerCustodyBroadcastRoutes } from "./routes/custody-broadcast.js";
 import { registerCustodyAcceptanceSimulationRoutes } from "./routes/custody-accept-simulate.js";
+import { registerCustodyAcceptanceBroadcastRoutes } from "./routes/custody-accept-broadcast.js";
 
 const app =
   Fastify({
@@ -300,7 +301,7 @@ await app.register(
           "Tenant-scoped HTTP API over the TraceForge indexed MySQL read model.",
 
         version:
-          "0.11.0",
+          "0.12.0",
       },
     },
   },
@@ -1370,6 +1371,7 @@ await registerPreflightRoutes(app);
 await registerCustodySimulationRoutes(app);
 await registerCustodyBroadcastRoutes(app);
 await registerCustodyAcceptanceSimulationRoutes(app);
+await registerCustodyAcceptanceBroadcastRoutes(app);
 await registerDiscoveryRoutes(app);
 
 app.get(

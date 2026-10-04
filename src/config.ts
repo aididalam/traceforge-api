@@ -99,6 +99,10 @@ export const config = {
         ),
       ),
 
+    runtimeBytecodeHash:
+      process.env.TRACEFORGE_RUNTIME_BYTECODE_HASH ??
+      null,
+
     rpcUrl:
       process.env.TRACEFORGE_RPC_URL ??
       "http://127.0.0.1:8545",

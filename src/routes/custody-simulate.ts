@@ -32,6 +32,10 @@ import {
 } from "../db.js";
 
 import {
+  runtimeBytecodeIntegrity,
+} from "../runtime-integrity.js";
+
+import {
   loadOrganizationAccount,
 } from "../signer.js";
 
@@ -261,6 +265,20 @@ export async function registerCustodySimulationRoutes(
               bytecode !==
                 "0x",
             ),
+        });
+
+        const runtimeIntegrity =
+          runtimeBytecodeIntegrity(
+            bytecode,
+          );
+
+        checks.push({
+          name:
+            "runtime_bytecode_hash",
+          ok:
+            runtimeIntegrity.ok,
+          detail:
+            `expected=${runtimeIntegrity.expected} actual=${runtimeIntegrity.actual}`,
         });
 
         checks.push({

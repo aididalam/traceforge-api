@@ -414,3 +414,87 @@ It requires an organization-bound `chain:write` token and verifies:
 The route always returns `broadcast: false`; v0.11 does not add an acceptance
 broadcast endpoint. Broadcasting remains controlled by the existing server
 safety flag and the final immutable-write checkpoint.
+## API v0.12 — controlled custody acceptance broadcast
+
+v0.12 adds:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/custody/acceptances/broadcast
+```
+
+The endpoint remains protected by the global server gate:
+
+```text
+TRACEFORGE_BROADCAST_ENABLED=false
+```
+
+It requires:
+
+- an organization-bound `chain:write` token;
+- an organization-aware mapped signer;
+- a valid `Idempotency-Key`;
+- `confirm: "BROADCAST"`;
+- chain ID 9009;
+- exact deployed runtime bytecode hash;
+- active tenant / organization / membership;
+- live wallet-to-organization binding;
+- an open entity;
+- an existing pending custody transfer;
+- the authenticated organization must be the pending recipient;
+- the pending source must still equal the current custodian;
+- a live `CUSTODY_TRANSFER` capability;
+- exact `acceptCustodyTransfer` simulation;
+- gas estimation and 20% gas-limit buffer.
+
+The signed transaction is journaled in `chain_write_operations` before node
+submission. The route supports same-key recovery for PREPARED/BROADCAST writes.
+
+A successful receipt is accepted only if it contains both a matching
+`CustodyTransferred` event and matching `TraceRecorded`. It then requires live
+readback proving the pending transfer is cleared and the entity's current
+custodian is the authenticated recipient organization.
+
+No acceptance transaction should be sent until the separate immutable-write
+checkpoint is reviewed.
+## API v0.12 — controlled custody acceptance broadcast
+
+v0.12 adds:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/custody/acceptances/broadcast
+```
+
+The endpoint remains protected by the global server gate:
+
+```text
+TRACEFORGE_BROADCAST_ENABLED=false
+```
+
+It requires:
+
+- an organization-bound `chain:write` token;
+- an organization-aware mapped signer;
+- a valid `Idempotency-Key`;
+- `confirm: "BROADCAST"`;
+- chain ID 9009;
+- exact deployed runtime bytecode hash;
+- active tenant / organization / membership;
+- live wallet-to-organization binding;
+- an open entity;
+- an existing pending custody transfer;
+- the authenticated organization must be the pending recipient;
+- the pending source must still equal the current custodian;
+- a live `CUSTODY_TRANSFER` capability;
+- exact `acceptCustodyTransfer` simulation;
+- gas estimation and 20% gas-limit buffer.
+
+The signed transaction is journaled in `chain_write_operations` before node
+submission. The route supports same-key recovery for PREPARED/BROADCAST writes.
+
+A successful receipt is accepted only if it contains both a matching
+`CustodyTransferred` event and matching `TraceRecorded`. It then requires live
+readback proving the pending transfer is cleared and the entity's current
+custodian is the authenticated recipient organization.
+
+No acceptance transaction should be sent until the separate immutable-write
+checkpoint is reviewed.
