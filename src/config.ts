@@ -112,6 +112,10 @@ export const config = {
     signerKeyFile:
       process.env.TRACEFORGE_SIGNER_KEY_FILE ??
       null,
+
+    broadcastEnabled:
+      process.env.TRACEFORGE_BROADCAST_ENABLED ===
+      "true",
   },
 
   mysql: {

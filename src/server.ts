@@ -24,6 +24,7 @@ import { registerDiscoveryRoutes } from "./routes/discovery.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPreflightRoutes } from "./routes/preflight.js";
 import { registerCustodySimulationRoutes } from "./routes/custody-simulate.js";
+import { registerCustodyBroadcastRoutes } from "./routes/custody-broadcast.js";
 
 const app =
   Fastify({
@@ -1366,6 +1367,7 @@ app.get<{
 await registerAuthRoutes(app);
 await registerPreflightRoutes(app);
 await registerCustodySimulationRoutes(app);
+await registerCustodyBroadcastRoutes(app);
 await registerDiscoveryRoutes(app);
 
 app.get(

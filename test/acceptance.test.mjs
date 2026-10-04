@@ -545,6 +545,59 @@ test(
 );
 
 test(
+  "broadcast endpoint is disabled by default",
+  async () => {
+    const response =
+      await fetch(
+        `${baseUrl}/v1/tenants/${tenantId}/entities/${batchId}/custody/proposals/broadcast`,
+        {
+          method:
+            "POST",
+
+          headers: {
+            Authorization:
+              `Bearer ${writerToken}`,
+
+            "Content-Type":
+              "application/json",
+
+            "Idempotency-Key":
+              "acceptance-disabled-broadcast",
+          },
+
+          body:
+            JSON.stringify({
+              toOrganizationId:
+                producerOrganizationId,
+
+              eventType:
+                custodyProposalEventType,
+
+              evidenceHash:
+                custodyProposalEvidenceHash,
+
+              confirm:
+                "BROADCAST",
+            }),
+        },
+      );
+
+    const body =
+      await response.json();
+
+    assert.equal(
+      response.status,
+      503,
+    );
+
+    assert.equal(
+      body.error?.code,
+      "broadcast_disabled",
+    );
+  },
+);
+
+test(
   "custody proposal simulation succeeds without broadcasting",
   async () => {
     const {
@@ -1085,6 +1138,12 @@ test(
     assert.ok(
       body.paths?.[
         "/v1/tenants/{tenantId}/entities/{entityId}/custody/proposals/simulate"
+      ],
+    );
+
+    assert.ok(
+      body.paths?.[
+        "/v1/tenants/{tenantId}/entities/{entityId}/custody/proposals/broadcast"
       ],
     );
   },

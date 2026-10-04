@@ -333,3 +333,45 @@ It checks that:
 - the simulation route is exposed in OpenAPI.
 
 The suite never submits a state-changing transaction.
+
+## Controlled custody broadcast endpoint
+
+API v0.10 adds:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/custody/proposals/broadcast
+```
+
+The route is **disabled by default**:
+
+```text
+TRACEFORGE_BROADCAST_ENABLED=false
+```
+
+A broadcast request requires all of the following:
+
+- an organization-bound `chain:write` token;
+- a valid `Idempotency-Key` header;
+- request body `confirm: "BROADCAST"`;
+- live signer / tenant / organization / membership / custody / recipient /
+  capability checks;
+- successful contract simulation;
+- gas estimation with a 20% gas-limit buffer;
+- zero-fee legacy transaction signing for TraceForge chain 9009.
+
+Before submitting, the API signs the exact transaction locally, computes its
+transaction hash, and stores both the operation and signed transaction in
+`chain_write_operations`. This permits recovery if the process exits between
+signing/submission/receipt handling.
+
+After submission it requires:
+
+- a successful receipt;
+- matching `CustodyTransferProposed`;
+- matching `TraceRecorded`;
+- live pending-custody readback matching the request.
+
+After confirmation the stored serialized transaction is cleared.
+
+The endpoint must remain disabled until the final immutable-write checkpoint is
+reviewed.
