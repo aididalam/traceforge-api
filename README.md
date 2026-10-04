@@ -209,3 +209,76 @@ npm run auth:revoke -- --token-id <id>
 ```
 
 Do not issue `chain:write` tokens until the signer boundary is configured.
+
+## Read-only chain write preflight
+
+API v0.8 adds:
+
+```text
+GET /v1/auth/preflight
+```
+
+The route never signs or broadcasts a transaction. It requires a
+`chain:write` API token and verifies live chain state before a future write
+endpoint is allowed to proceed.
+
+Required runtime configuration:
+
+```text
+TRACEFORGE_RPC_URL=http://127.0.0.1:8545
+TRACEFORGE_SIGNER_ADDRESS=<public signer wallet address>
+```
+
+Supported capability names map exactly to the immutable Solidity enum order:
+
+```text
+ENTITY_CREATE       0
+TRACE_RECORD        1
+STATE_UPDATE        2
+METADATA_UPDATE     3
+CUSTODY_TRANSFER    4
+ENTITY_LINK         5
+ENTITY_CLOSE        6
+```
+
+Example:
+
+```text
+/v1/auth/preflight?capability=CUSTODY_TRANSFER&entityId=<id>&requireCustody=true&pendingCustody=forbidden
+```
+
+`pendingCustody` may be `ignore`, `required`, or `forbidden`.
+
+The preflight checks chain ID, deployed bytecode, tenant/org/membership state,
+signer wallet binding, live `hasCapability` authorization, and optional entity,
+custody, closed-state, and pending-custody conditions.
+
+The role candidate list comes from the indexed read model, but authorization is
+accepted only when the deployed contract's live `hasCapability` returns true.
+
+## v0.8 preflight acceptance coverage
+
+The acceptance suite also exercises the live chain preflight boundary.
+
+It expects the writer token at:
+
+```text
+~/.traceforge/secrets/api-sandbox-writer.token
+```
+
+Override with either:
+
+```text
+TRACEFORGE_WRITER_TOKEN_FILE
+TRACEFORGE_WRITER_TOKEN
+```
+
+The live preflight tests verify:
+
+- a distributor writer is authorized for `CUSTODY_TRANSFER`;
+- every required live-chain check passes for the open sandbox batch;
+- a read-only token is rejected with `insufficient_scope`;
+- the already-closed sandbox item fails the `entity_open` guard;
+- `/v1/auth/preflight` is present in OpenAPI.
+
+No acceptance test signs or broadcasts a transaction.

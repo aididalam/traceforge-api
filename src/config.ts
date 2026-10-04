@@ -53,6 +53,23 @@ function address(
   return value.toLowerCase();
 }
 
+function optionalAddress(
+  name: string,
+  value: string | undefined,
+): string | null {
+  if (
+    value === undefined ||
+    value.length === 0
+  ) {
+    return null;
+  }
+
+  return address(
+    name,
+    value,
+  );
+}
+
 export const config = {
   host:
     process.env.API_HOST ??
@@ -80,6 +97,16 @@ export const config = {
         required(
           "TRACEFORGE_CONTRACT_ADDRESS",
         ),
+      ),
+
+    rpcUrl:
+      process.env.TRACEFORGE_RPC_URL ??
+      "http://127.0.0.1:8545",
+
+    signerAddress:
+      optionalAddress(
+        "TRACEFORGE_SIGNER_ADDRESS",
+        process.env.TRACEFORGE_SIGNER_ADDRESS,
       ),
   },
 

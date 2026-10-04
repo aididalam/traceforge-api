@@ -31,6 +31,29 @@ const apiToken =
     "utf8",
   ).trim();
 
+const writerTokenFile =
+  process.env.TRACEFORGE_WRITER_TOKEN_FILE ??
+  resolve(
+    homedir(),
+    ".traceforge/secrets/api-sandbox-writer.token",
+  );
+
+const writerToken =
+  process.env.TRACEFORGE_WRITER_TOKEN ??
+  readLocalFile(
+    writerTokenFile,
+    "utf8",
+  ).trim();
+
+const distributorOrganizationId =
+  process.env.TRACEFORGE_TEST_DISTRIBUTOR_ORG_ID ??
+  "0x6d143f0625d0664c5d27b4a6e17141c05dc24eac70cd8a20552f620264b40f5f";
+
+const distributorRoleId =
+  process.env.TRACEFORGE_TEST_DISTRIBUTOR_ROLE_ID ??
+  "0x5027b0e868d0fd05911c89da388fdd1393cc1ba493938df52179c481df0c00d3";
+
+
 
 const tenantId =
   process.env.TRACEFORGE_TEST_TENANT_ID ??
@@ -466,6 +489,181 @@ test(
 );
 
 test(
+  "live chain preflight authorizes the distributor writer",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await getJson(
+        `/v1/auth/preflight?capability=CUSTODY_TRANSFER&entityId=${batchId}&requireCustody=true&pendingCustody=forbidden`,
+        {
+          token:
+            writerToken,
+        },
+      );
+
+    assert.equal(
+      response.status,
+      200,
+    );
+
+    assert.equal(
+      body.ready,
+      true,
+    );
+
+    assert.equal(
+      body.capability,
+      "CUSTODY_TRANSFER",
+    );
+
+    assert.equal(
+      body.capabilityIndex,
+      4,
+    );
+
+    assert.equal(
+      body.organizationId,
+      distributorOrganizationId,
+    );
+
+    assert.equal(
+      body.authorizedRoleId,
+      distributorRoleId,
+    );
+
+    assert.equal(
+      body.entity?.exists,
+      true,
+    );
+
+    assert.equal(
+      body.entity?.closed,
+      false,
+    );
+
+    assert.equal(
+      body.entity?.currentCustodian,
+      distributorOrganizationId,
+    );
+
+    assert.equal(
+      body.pendingCustody,
+      null,
+    );
+
+    assert.ok(
+      Array.isArray(
+        body.checks,
+      ),
+    );
+
+    assert.ok(
+      body.checks.length >=
+      10,
+    );
+
+    for (
+      const check of
+        body.checks
+    ) {
+      assert.equal(
+        check.ok,
+        true,
+        `preflight check failed: ${check.name}`,
+      );
+    }
+
+    const pending =
+      body.checks.find(
+        (check) =>
+          check.name ===
+          "pending_custody",
+      );
+
+    assert.equal(
+      pending?.detail,
+      "mode=forbidden exists=false",
+    );
+  },
+);
+
+test(
+  "read-only token is rejected by chain write preflight",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await getJson(
+        "/v1/auth/preflight?capability=CUSTODY_TRANSFER",
+      );
+
+    assert.equal(
+      response.status,
+      403,
+    );
+
+    assert.equal(
+      body.error?.code,
+      "insufficient_scope",
+    );
+  },
+);
+
+test(
+  "live chain preflight detects a closed entity",
+  async () => {
+    const {
+      response,
+      body,
+    } =
+      await getJson(
+        `/v1/auth/preflight?capability=ENTITY_CLOSE&entityId=${itemId}&requireCustody=true`,
+        {
+          token:
+            writerToken,
+        },
+      );
+
+    assert.equal(
+      response.status,
+      200,
+    );
+
+    assert.equal(
+      body.ready,
+      false,
+    );
+
+    const entityOpen =
+      body.checks.find(
+        (check) =>
+          check.name ===
+          "entity_open",
+      );
+
+    assert.equal(
+      entityOpen?.ok,
+      false,
+    );
+
+    const custody =
+      body.checks.find(
+        (check) =>
+          check.name ===
+          "current_custody",
+      );
+
+    assert.equal(
+      custody?.ok,
+      true,
+    );
+  },
+);
+
+test(
   "authenticated token exposes its principal and scopes",
   async () => {
     const {
@@ -628,6 +826,12 @@ test(
     assert.ok(
       body.paths?.[
         "/v1/tenants/{tenantId}/relationships"
+      ],
+    );
+
+    assert.ok(
+      body.paths?.[
+        "/v1/auth/preflight"
       ],
     );
   },
