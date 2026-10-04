@@ -1,6 +1,6 @@
 {
   "name": "@traceforge/api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TraceForge tenant-scoped HTTP API over the indexed MySQL read model",
   "main": "index.js",
   "scripts": {

@@ -33,6 +33,10 @@ interface EntityRow
     | string
     | number
     | null;
+  metadata_document:
+    | string
+    | Record<string, unknown>
+    | null;
 }
 
 interface EventRow
@@ -46,11 +50,41 @@ interface EventRow
   transaction_hash: string;
   transaction_index: number;
   log_index: number;
+  metadata_hash:
+    | string
+    | null;
+  evidence_hash:
+    | string
+    | null;
+  metadata_document:
+    | string
+    | Record<string, unknown>
+    | null;
+  evidence_document:
+    | string
+    | Record<string, unknown>
+    | null;
+}
+
+interface DocumentRow
+  extends RowDataPacket {
+  content_hash: string;
+  document_kind: string;
+  source_ref: string;
+  byte_length: string | number;
+  document_json:
+    | string
+    | Record<string, unknown>;
+  imported_at: Date | string;
 }
 
 interface EntityParams {
   tenantId: string;
   entityId: string;
+}
+
+interface DocumentParams {
+  contentHash: string;
 }
 
 interface HistoryQuery {
@@ -114,11 +148,19 @@ function isBytes32(
   );
 }
 
-function parseEventArgs(
+function parseJsonObject(
   value:
     | string
-    | Record<string, unknown>,
-): Record<string, unknown> {
+    | Record<string, unknown>
+    | null,
+): Record<string, unknown> | null {
+  if (
+    value ===
+    null
+  ) {
+    return null;
+  }
+
   if (
     typeof value ===
     "string"
@@ -132,6 +174,28 @@ function parseEventArgs(
   }
 
   return value;
+}
+
+function parseEventArgs(
+  value:
+    | string
+    | Record<string, unknown>,
+): Record<string, unknown> {
+  const parsed =
+    parseJsonObject(
+      value,
+    );
+
+  if (
+    parsed ===
+    null
+  ) {
+    throw new Error(
+      "Event args cannot be null.",
+    );
+  }
+
+  return parsed;
 }
 
 function parseLimit(
@@ -199,7 +263,7 @@ await app.register(
           "Tenant-scoped HTTP API over the TraceForge indexed MySQL read model.",
 
         version:
-          "0.2.0",
+          "0.3.0",
       },
     },
   },
@@ -372,6 +436,134 @@ app.get(
 );
 
 app.get<{
+  Params: DocumentParams;
+}>(
+  "/v1/documents/:contentHash",
+  {
+    schema: {
+      tags: [
+        "documents",
+      ],
+
+      params: {
+        type:
+          "object",
+
+        required: [
+          "contentHash",
+        ],
+
+        properties: {
+          contentHash: {
+            type:
+              "string",
+            pattern:
+              bytes32Pattern,
+          },
+        },
+      },
+
+      response: {
+        400:
+          errorResponseSchema,
+
+        404:
+          errorResponseSchema,
+      },
+    },
+  },
+  async (
+    request,
+    reply,
+  ) => {
+    const {
+      contentHash,
+    } =
+      request.params;
+
+    if (
+      !isBytes32(
+        contentHash,
+      )
+    ) {
+      reply.code(
+        400,
+      );
+
+      return apiError(
+        "invalid_identifier",
+        "contentHash must be a bytes32 hex value.",
+      );
+    }
+
+    const [rows] =
+      await db.query<
+        DocumentRow[]
+      >(
+        `
+          SELECT
+            content_hash,
+            document_kind,
+            source_ref,
+            byte_length,
+            document_json,
+            imported_at
+          FROM offchain_documents
+          WHERE content_hash = ?
+        `,
+        [
+          contentHash,
+        ],
+      );
+
+    if (
+      rows.length ===
+      0
+    ) {
+      reply.code(
+        404,
+      );
+
+      return apiError(
+        "document_not_found",
+        "Off-chain document was not found.",
+      );
+    }
+
+    const row =
+      rows[0];
+
+    return {
+      contentHash:
+        row.content_hash,
+
+      documentKind:
+        row.document_kind,
+
+      sourceRef:
+        row.source_ref,
+
+      byteLength:
+        String(
+          row.byte_length,
+        ),
+
+      document:
+        parseJsonObject(
+          row.document_json,
+        ),
+
+      importedAt:
+        row.imported_at instanceof Date
+          ? row.imported_at.toISOString()
+          : String(
+              row.imported_at,
+            ),
+    };
+  },
+);
+
+app.get<{
   Params: EntityParams;
 }>(
   "/v1/tenants/:tenantId/entities/:entityId",
@@ -450,18 +642,22 @@ app.get<{
       >(
         `
           SELECT
-            tenant_id,
-            entity_id,
-            entity_type,
-            metadata_hash,
-            current_state,
-            current_custodian,
-            closed,
-            created_at,
-            closed_at
-          FROM entities
-          WHERE tenant_id = ?
-            AND entity_id = ?
+            e.tenant_id,
+            e.entity_id,
+            e.entity_type,
+            e.metadata_hash,
+            e.current_state,
+            e.current_custodian,
+            e.closed,
+            e.created_at,
+            e.closed_at,
+            d.document_json AS metadata_document
+          FROM entities e
+          LEFT JOIN offchain_documents d
+            ON d.content_hash =
+               e.metadata_hash
+          WHERE e.tenant_id = ?
+            AND e.entity_id = ?
         `,
         [
           tenantId,
@@ -498,6 +694,11 @@ app.get<{
 
       metadataHash:
         entity.metadata_hash,
+
+      metadata:
+        parseJsonObject(
+          entity.metadata_document,
+        ),
 
       currentState:
         entity.current_state,
@@ -651,10 +852,22 @@ app.get<{
       >(
         `
           SELECT
-            entity_id
-          FROM entities
-          WHERE tenant_id = ?
-            AND entity_id = ?
+            e.tenant_id,
+            e.entity_id,
+            e.entity_type,
+            e.metadata_hash,
+            e.current_state,
+            e.current_custodian,
+            e.closed,
+            e.created_at,
+            e.closed_at,
+            d.document_json AS metadata_document
+          FROM entities e
+          LEFT JOIN offchain_documents d
+            ON d.content_hash =
+               e.metadata_hash
+          WHERE e.tenant_id = ?
+            AND e.entity_id = ?
         `,
         [
           tenantId,
@@ -685,47 +898,105 @@ app.get<{
       >(
         `
           SELECT
-            id,
-            event_name,
-            event_args,
-            block_number,
-            transaction_hash,
-            transaction_index,
-            log_index
-          FROM chain_events
-          WHERE chain_id = ?
-            AND contract_address = ?
-            AND id > ?
+            ce.id,
+            ce.event_name,
+            ce.event_args,
+            ce.block_number,
+            ce.transaction_hash,
+            ce.transaction_index,
+            ce.log_index,
+
+            COALESCE(
+              JSON_UNQUOTE(
+                JSON_EXTRACT(
+                  ce.event_args,
+                  '$.metadataHashAfter'
+                )
+              ),
+              JSON_UNQUOTE(
+                JSON_EXTRACT(
+                  ce.event_args,
+                  '$.metadataHash'
+                )
+              )
+            ) AS metadata_hash,
+
+            JSON_UNQUOTE(
+              JSON_EXTRACT(
+                ce.event_args,
+                '$.evidenceHash'
+              )
+            ) AS evidence_hash,
+
+            md.document_json
+              AS metadata_document,
+
+            ed.document_json
+              AS evidence_document
+
+          FROM chain_events ce
+
+          LEFT JOIN offchain_documents md
+            ON md.content_hash =
+               COALESCE(
+                 JSON_UNQUOTE(
+                   JSON_EXTRACT(
+                     ce.event_args,
+                     '$.metadataHashAfter'
+                   )
+                 ),
+                 JSON_UNQUOTE(
+                   JSON_EXTRACT(
+                     ce.event_args,
+                     '$.metadataHash'
+                   )
+                 )
+               )
+
+          LEFT JOIN offchain_documents ed
+            ON ed.content_hash =
+               JSON_UNQUOTE(
+                 JSON_EXTRACT(
+                   ce.event_args,
+                   '$.evidenceHash'
+                 )
+               )
+
+          WHERE ce.chain_id = ?
+            AND ce.contract_address = ?
+            AND ce.id > ?
             AND JSON_UNQUOTE(
                   JSON_EXTRACT(
-                    event_args,
+                    ce.event_args,
                     '$.tenantId'
                   )
                 ) = ?
             AND (
               JSON_UNQUOTE(
                 JSON_EXTRACT(
-                  event_args,
+                  ce.event_args,
                   '$.entityId'
                 )
               ) = ?
               OR
               JSON_UNQUOTE(
                 JSON_EXTRACT(
-                  event_args,
+                  ce.event_args,
                   '$.sourceEntityId'
                 )
               ) = ?
               OR
               JSON_UNQUOTE(
                 JSON_EXTRACT(
-                  event_args,
+                  ce.event_args,
                   '$.targetEntityId'
                 )
               ) = ?
             )
+
           ORDER BY
-            id
+            ce.id
+
           LIMIT ?
         `,
         [
@@ -758,9 +1029,36 @@ app.get<{
           1
       ];
 
+    const entity =
+      entityRows[0];
+
     return {
       tenantId,
       entityId,
+
+      entity: {
+        entityType:
+          entity.entity_type,
+
+        metadataHash:
+          entity.metadata_hash,
+
+        metadata:
+          parseJsonObject(
+            entity.metadata_document,
+          ),
+
+        currentState:
+          entity.current_state,
+
+        currentCustodian:
+          entity.current_custodian,
+
+        closed:
+          Boolean(
+            entity.closed,
+          ),
+      },
 
       events:
         pageRows.map(
@@ -776,6 +1074,22 @@ app.get<{
             args:
               parseEventArgs(
                 row.event_args,
+              ),
+
+            metadataHash:
+              row.metadata_hash,
+
+            metadata:
+              parseJsonObject(
+                row.metadata_document,
+              ),
+
+            evidenceHash:
+              row.evidence_hash,
+
+            evidence:
+              parseJsonObject(
+                row.evidence_document,
               ),
 
             blockNumber:

@@ -56,3 +56,24 @@ Entity history supports cursor pagination:
 `.env` is local-only and ignored by Git.
 
 Never commit private keys or production database credentials.
+
+## Resolved off-chain documents
+
+API v0.3 resolves off-chain JSON documents by their on-chain content hash.
+
+Entity responses include both `metadataHash` and resolved `metadata` when the
+document exists in `offchain_documents`.
+
+History responses include:
+
+- `metadataHash` and `metadata`
+- `evidenceHash` and `evidence`
+
+Missing off-chain content does not invalidate the chain event. In that case the
+hash remains available and the resolved document is `null`.
+
+A document can also be fetched directly:
+
+```text
+GET /v1/documents/:contentHash
+```
