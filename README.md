@@ -510,3 +510,44 @@ The validator defaults to:
 ```
 
 and can also receive one or more explicit JSON files or directories.
+## API v0.14 — generic write simulation foundation
+
+v0.14 exposes non-broadcast simulation routes for all non-custody protocol
+capabilities. They use the same organization-aware signer and centralized live
+write-safety checks as custody operations.
+
+Routes:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/create/simulate
+POST /v1/tenants/:tenantId/entities/:entityId/traces/simulate
+POST /v1/tenants/:tenantId/entities/:entityId/state/simulate
+POST /v1/tenants/:tenantId/entities/:entityId/metadata/simulate
+POST /v1/tenants/:tenantId/entities/:entityId/links/simulate
+POST /v1/tenants/:tenantId/entities/:entityId/links/status/simulate
+POST /v1/tenants/:tenantId/entities/:entityId/close/simulate
+```
+
+Each route requires an organization-bound `chain:write` token and selects the
+live role that grants the corresponding fixed capability:
+
+```text
+ENTITY_CREATE    = 0
+TRACE_RECORD     = 1
+STATE_UPDATE     = 2
+METADATA_UPDATE  = 3
+ENTITY_LINK      = 5
+ENTITY_CLOSE     = 6
+```
+
+All routes verify chain ID, exact deployed runtime bytecode hash, tenant and
+organization status, tenant membership, signer wallet binding, and live
+capability authorization before exact contract simulation and gas estimation.
+
+Entity mutation simulations require an existing open entity. Entity creation
+requires the requested entity ID to be absent. Link simulations require both
+source and target entities to exist and remain open. Close simulation also
+requires no pending custody transfer.
+
+These routes never sign or broadcast transactions. Controlled broadcast support
+for generic operations is intentionally deferred to a later milestone.
