@@ -551,3 +551,159 @@ requires no pending custody transfer.
 
 These routes never sign or broadcast transactions. Controlled broadcast support
 for generic operations is intentionally deferred to a later milestone.
+## API v0.15 — controlled generic broadcast engine
+
+v0.15 adds disabled-by-default controlled broadcast routes for the seven
+non-custody write operations introduced as simulations in v0.14:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/create/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/traces/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/state/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/metadata/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/links/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/links/status/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/close/broadcast
+```
+
+Every route is protected by `TRACEFORGE_BROADCAST_ENABLED`, organization-bound
+`chain:write` authentication, organization-aware signer selection, exact runtime
+bytecode verification, live capability checks, exact contract simulation,
+gas estimation plus a 20% limit buffer, and an explicit
+`confirm: "BROADCAST"` body field.
+
+The routes share one idempotent journal layer backed by
+`chain_write_operations`. The exact signed legacy transaction is persisted
+before submission. Same-key recovery can resubmit the identical serialized
+transaction after a process or network failure; a different payload with the
+same key is rejected.
+
+Successful receipts are verified against the operation-specific immutable
+domain event and live contract readback:
+
+- `createEntity` -> `EntityCreated` + created entity readback;
+- `recordTrace` -> matching `TraceRecorded` with entity state unchanged;
+- `updateEntityState` -> matching `TraceRecorded` + new state readback;
+- `updateEntityMetadata` -> matching `TraceRecorded` + new metadata readback;
+- `createEntityLink` -> `EntityLinkCreated` + active link readback;
+- `setEntityLinkActive` -> `EntityLinkStatusChanged` + status readback;
+- `closeEntity` -> `EntityClosed` + `TraceRecorded` + terminal-state readback.
+
+Final receipt verification clears the serialized transaction from the journal.
+A mined transaction whose receipt or readback cannot be verified is marked
+`FAILED`, its serialized transaction is cleared, and the same idempotency key
+cannot accidentally cause a second mutation.
+
+v0.15 does not enable broadcasting. Development and production configuration
+should keep:
+
+```text
+TRACEFORGE_BROADCAST_ENABLED=false
+```
+
+until an operation-specific evidence document, simulation, state checkpoint,
+and immutable-write review are complete.
+## API v0.15 — controlled generic broadcast engine
+
+v0.15 adds disabled-by-default controlled broadcast routes for the seven
+non-custody write operations introduced as simulations in v0.14:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/create/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/traces/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/state/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/metadata/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/links/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/links/status/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/close/broadcast
+```
+
+Every route is protected by `TRACEFORGE_BROADCAST_ENABLED`, organization-bound
+`chain:write` authentication, organization-aware signer selection, exact runtime
+bytecode verification, live capability checks, exact contract simulation,
+gas estimation plus a 20% limit buffer, and an explicit
+`confirm: "BROADCAST"` body field.
+
+The routes share one idempotent journal layer backed by
+`chain_write_operations`. The exact signed legacy transaction is persisted
+before submission. Same-key recovery can resubmit the identical serialized
+transaction after a process or network failure; a different payload with the
+same key is rejected.
+
+Successful receipts are verified against the operation-specific immutable
+domain event and live contract readback:
+
+- `createEntity` -> `EntityCreated` + created entity readback;
+- `recordTrace` -> matching `TraceRecorded` with entity state unchanged;
+- `updateEntityState` -> matching `TraceRecorded` + new state readback;
+- `updateEntityMetadata` -> matching `TraceRecorded` + new metadata readback;
+- `createEntityLink` -> `EntityLinkCreated` + active link readback;
+- `setEntityLinkActive` -> `EntityLinkStatusChanged` + status readback;
+- `closeEntity` -> `EntityClosed` + `TraceRecorded` + terminal-state readback.
+
+Final receipt verification clears the serialized transaction from the journal.
+A mined transaction whose receipt or readback cannot be verified is marked
+`FAILED`, its serialized transaction is cleared, and the same idempotency key
+cannot accidentally cause a second mutation.
+
+v0.15 does not enable broadcasting. Development and production configuration
+should keep:
+
+```text
+TRACEFORGE_BROADCAST_ENABLED=false
+```
+
+until an operation-specific evidence document, simulation, state checkpoint,
+and immutable-write review are complete.
+## API v0.15 — controlled generic broadcast engine
+
+v0.15 adds disabled-by-default controlled broadcast routes for the seven
+non-custody write operations introduced as simulations in v0.14:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/create/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/traces/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/state/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/metadata/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/links/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/links/status/broadcast
+POST /v1/tenants/:tenantId/entities/:entityId/close/broadcast
+```
+
+Every route is protected by `TRACEFORGE_BROADCAST_ENABLED`, organization-bound
+`chain:write` authentication, organization-aware signer selection, exact runtime
+bytecode verification, live capability checks, exact contract simulation,
+gas estimation plus a 20% limit buffer, and an explicit
+`confirm: "BROADCAST"` body field.
+
+The routes share one idempotent journal layer backed by
+`chain_write_operations`. The exact signed legacy transaction is persisted
+before submission. Same-key recovery can resubmit the identical serialized
+transaction after a process or network failure; a different payload with the
+same key is rejected.
+
+Successful receipts are verified against the operation-specific immutable
+domain event and live contract readback:
+
+- `createEntity` -> `EntityCreated` + created entity readback;
+- `recordTrace` -> matching `TraceRecorded` with entity state unchanged;
+- `updateEntityState` -> matching `TraceRecorded` + new state readback;
+- `updateEntityMetadata` -> matching `TraceRecorded` + new metadata readback;
+- `createEntityLink` -> `EntityLinkCreated` + active link readback;
+- `setEntityLinkActive` -> `EntityLinkStatusChanged` + status readback;
+- `closeEntity` -> `EntityClosed` + `TraceRecorded` + terminal-state readback.
+
+Final receipt verification clears the serialized transaction from the journal.
+A mined transaction whose receipt or readback cannot be verified is marked
+`FAILED`, its serialized transaction is cleared, and the same idempotency key
+cannot accidentally cause a second mutation.
+
+v0.15 does not enable broadcasting. Development and production configuration
+should keep:
+
+```text
+TRACEFORGE_BROADCAST_ENABLED=false
+```
+
+until an operation-specific evidence document, simulation, state checkpoint,
+and immutable-write review are complete.

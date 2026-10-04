@@ -472,4 +472,87 @@ export const traceForgeWriteAbi = [
     outputs: [],
   },
 
+  {
+    type:
+      "event",
+    name:
+      "EntityCreated",
+    anonymous:
+      false,
+    inputs: [
+      { indexed: true, name: "tenantId", type: "bytes32" },
+      { indexed: true, name: "entityId", type: "bytes32" },
+      { indexed: true, name: "entityType", type: "bytes32" },
+      { indexed: false, name: "organizationId", type: "bytes32" },
+      { indexed: false, name: "actor", type: "address" },
+      { indexed: false, name: "metadataHash", type: "bytes32" },
+      { indexed: false, name: "initialState", type: "bytes32" },
+      { indexed: false, name: "createdAt", type: "uint64" },
+    ],
+  },
+
+  {
+    type:
+      "event",
+    name:
+      "EntityLinkCreated",
+    anonymous:
+      false,
+    inputs: [
+      { indexed: true, name: "tenantId", type: "bytes32" },
+      { indexed: true, name: "linkId", type: "bytes32" },
+      { indexed: true, name: "sourceEntityId", type: "bytes32" },
+      { indexed: false, name: "targetEntityId", type: "bytes32" },
+      { indexed: false, name: "linkType", type: "bytes32" },
+      { indexed: false, name: "organizationId", type: "bytes32" },
+      { indexed: false, name: "roleId", type: "bytes32" },
+      { indexed: false, name: "actor", type: "address" },
+      { indexed: false, name: "eventType", type: "bytes32" },
+      { indexed: false, name: "evidenceHash", type: "bytes32" },
+      { indexed: false, name: "createdAt", type: "uint64" },
+    ],
+  },
+
+  {
+    type:
+      "event",
+    name:
+      "EntityLinkStatusChanged",
+    anonymous:
+      false,
+    inputs: [
+      { indexed: true, name: "tenantId", type: "bytes32" },
+      { indexed: true, name: "linkId", type: "bytes32" },
+      { indexed: true, name: "sourceEntityId", type: "bytes32" },
+      { indexed: false, name: "targetEntityId", type: "bytes32" },
+      { indexed: false, name: "linkType", type: "bytes32" },
+      { indexed: false, name: "active", type: "bool" },
+      { indexed: false, name: "organizationId", type: "bytes32" },
+      { indexed: false, name: "roleId", type: "bytes32" },
+      { indexed: false, name: "actor", type: "address" },
+      { indexed: false, name: "eventType", type: "bytes32" },
+      { indexed: false, name: "evidenceHash", type: "bytes32" },
+      { indexed: false, name: "updatedAt", type: "uint64" },
+    ],
+  },
+
+  {
+    type:
+      "event",
+    name:
+      "EntityClosed",
+    anonymous:
+      false,
+    inputs: [
+      { indexed: true, name: "tenantId", type: "bytes32" },
+      { indexed: true, name: "entityId", type: "bytes32" },
+      { indexed: true, name: "organizationId", type: "bytes32" },
+      { indexed: false, name: "roleId", type: "bytes32" },
+      { indexed: false, name: "actor", type: "address" },
+      { indexed: false, name: "eventType", type: "bytes32" },
+      { indexed: false, name: "evidenceHash", type: "bytes32" },
+      { indexed: false, name: "closedAt", type: "uint64" },
+    ],
+  },
+
 ] as const;

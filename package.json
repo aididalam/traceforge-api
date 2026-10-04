@@ -1,6 +1,6 @@
 {
   "name": "@traceforge/api",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "TraceForge tenant-scoped HTTP API over the indexed MySQL read model",
   "main": "index.js",
   "scripts": {
@@ -14,7 +14,8 @@
     "verify:custody-acceptance": "node scripts/verify-custody-acceptance.mjs",
     "verify:custody-acceptance-broadcast-disabled": "node scripts/verify-custody-acceptance-broadcast-disabled.mjs",
     "provenance:validate": "node scripts/validate-custody-provenance.mjs",
-    "verify:generic-write-simulations": "node scripts/verify-generic-write-simulations.mjs"
+    "verify:generic-write-simulations": "node scripts/verify-generic-write-simulations.mjs",
+    "verify:generic-broadcast-disabled": "node scripts/verify-generic-broadcast-disabled.mjs"
   },
   "keywords": [],
   "author": "",

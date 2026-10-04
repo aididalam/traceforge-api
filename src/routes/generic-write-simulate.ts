@@ -42,7 +42,7 @@ const bytes32Schema = {
     "^0x[0-9a-fA-F]{64}$",
 } as const;
 
-interface MutationSpec {
+export interface MutationSpec {
   path: string;
   operation: string;
   capabilityIndex: number;
@@ -299,7 +299,7 @@ async function closeChecks(
   };
 }
 
-const mutationSpecs:
+export const genericMutationSpecs:
 MutationSpec[] = [
   {
     path:
@@ -833,7 +833,7 @@ export async function registerGenericWriteSimulationRoutes(
   app: FastifyInstance,
 ) {
   for (
-    const spec of mutationSpecs
+    const spec of genericMutationSpecs
   ) {
     app.post(
       spec.path,
