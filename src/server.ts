@@ -24,8 +24,14 @@ interface EntityRow
   tenant_id: string;
   entity_id: string;
   entity_type: string;
+  entity_type_label:
+    | string
+    | null;
   metadata_hash: string;
   current_state: string;
+  current_state_label:
+    | string
+    | null;
   current_custodian: string;
   closed: number | boolean;
   created_at: string | number;
@@ -54,6 +60,24 @@ interface EventRow
     | string
     | null;
   evidence_hash:
+    | string
+    | null;
+  event_type:
+    | string
+    | null;
+  event_type_label:
+    | string
+    | null;
+  state_after:
+    | string
+    | null;
+  state_after_label:
+    | string
+    | null;
+  link_type:
+    | string
+    | null;
+  link_type_label:
     | string
     | null;
   metadata_document:
@@ -263,7 +287,7 @@ await app.register(
           "Tenant-scoped HTTP API over the TraceForge indexed MySQL read model.",
 
         version:
-          "0.3.0",
+          "0.4.0",
       },
     },
   },
@@ -645,21 +669,49 @@ app.get<{
             e.tenant_id,
             e.entity_id,
             e.entity_type,
+            et.display_label
+              AS entity_type_label,
             e.metadata_hash,
             e.current_state,
+            st.display_label
+              AS current_state_label,
             e.current_custodian,
             e.closed,
             e.created_at,
             e.closed_at,
-            d.document_json AS metadata_document
+            d.document_json
+              AS metadata_document
+
           FROM entities e
+
           LEFT JOIN offchain_documents d
             ON d.content_hash =
                e.metadata_hash
+
+          LEFT JOIN semantic_registry et
+            ON et.chain_id = ?
+           AND et.contract_address = ?
+           AND et.semantic_kind =
+               'entity_type'
+           AND et.semantic_hash =
+               e.entity_type
+
+          LEFT JOIN semantic_registry st
+            ON st.chain_id = ?
+           AND st.contract_address = ?
+           AND st.semantic_kind =
+               'state'
+           AND st.semantic_hash =
+               e.current_state
+
           WHERE e.tenant_id = ?
             AND e.entity_id = ?
         `,
         [
+          config.traceforge.chainId,
+          config.traceforge.contractAddress,
+          config.traceforge.chainId,
+          config.traceforge.contractAddress,
           tenantId,
           entityId,
         ],
@@ -692,6 +744,9 @@ app.get<{
       entityType:
         entity.entity_type,
 
+      entityTypeLabel:
+        entity.entity_type_label,
+
       metadataHash:
         entity.metadata_hash,
 
@@ -702,6 +757,9 @@ app.get<{
 
       currentState:
         entity.current_state,
+
+      currentStateLabel:
+        entity.current_state_label,
 
       currentCustodian:
         entity.current_custodian,
@@ -855,21 +913,49 @@ app.get<{
             e.tenant_id,
             e.entity_id,
             e.entity_type,
+            et.display_label
+              AS entity_type_label,
             e.metadata_hash,
             e.current_state,
+            st.display_label
+              AS current_state_label,
             e.current_custodian,
             e.closed,
             e.created_at,
             e.closed_at,
-            d.document_json AS metadata_document
+            d.document_json
+              AS metadata_document
+
           FROM entities e
+
           LEFT JOIN offchain_documents d
             ON d.content_hash =
                e.metadata_hash
+
+          LEFT JOIN semantic_registry et
+            ON et.chain_id = ?
+           AND et.contract_address = ?
+           AND et.semantic_kind =
+               'entity_type'
+           AND et.semantic_hash =
+               e.entity_type
+
+          LEFT JOIN semantic_registry st
+            ON st.chain_id = ?
+           AND st.contract_address = ?
+           AND st.semantic_kind =
+               'state'
+           AND st.semantic_hash =
+               e.current_state
+
           WHERE e.tenant_id = ?
             AND e.entity_id = ?
         `,
         [
+          config.traceforge.chainId,
+          config.traceforge.contractAddress,
+          config.traceforge.chainId,
+          config.traceforge.contractAddress,
           tenantId,
           entityId,
         ],
@@ -928,6 +1014,44 @@ app.get<{
               )
             ) AS evidence_hash,
 
+            JSON_UNQUOTE(
+              JSON_EXTRACT(
+                ce.event_args,
+                '$.eventType'
+              )
+            ) AS event_type,
+
+            ev.display_label
+              AS event_type_label,
+
+            COALESCE(
+              JSON_UNQUOTE(
+                JSON_EXTRACT(
+                  ce.event_args,
+                  '$.stateAfter'
+                )
+              ),
+              JSON_UNQUOTE(
+                JSON_EXTRACT(
+                  ce.event_args,
+                  '$.initialState'
+                )
+              )
+            ) AS state_after,
+
+            state_sem.display_label
+              AS state_after_label,
+
+            JSON_UNQUOTE(
+              JSON_EXTRACT(
+                ce.event_args,
+                '$.linkType'
+              )
+            ) AS link_type,
+
+            link_sem.display_label
+              AS link_type_label,
+
             md.document_json
               AS metadata_document,
 
@@ -959,6 +1083,53 @@ app.get<{
                  JSON_EXTRACT(
                    ce.event_args,
                    '$.evidenceHash'
+                 )
+               )
+
+          LEFT JOIN semantic_registry ev
+            ON ev.chain_id = ?
+           AND ev.contract_address = ?
+           AND ev.semantic_kind =
+               'event_type'
+           AND ev.semantic_hash =
+               JSON_UNQUOTE(
+                 JSON_EXTRACT(
+                   ce.event_args,
+                   '$.eventType'
+                 )
+               )
+
+          LEFT JOIN semantic_registry state_sem
+            ON state_sem.chain_id = ?
+           AND state_sem.contract_address = ?
+           AND state_sem.semantic_kind =
+               'state'
+           AND state_sem.semantic_hash =
+               COALESCE(
+                 JSON_UNQUOTE(
+                   JSON_EXTRACT(
+                     ce.event_args,
+                     '$.stateAfter'
+                   )
+                 ),
+                 JSON_UNQUOTE(
+                   JSON_EXTRACT(
+                     ce.event_args,
+                     '$.initialState'
+                   )
+                 )
+               )
+
+          LEFT JOIN semantic_registry link_sem
+            ON link_sem.chain_id = ?
+           AND link_sem.contract_address = ?
+           AND link_sem.semantic_kind =
+               'link_type'
+           AND link_sem.semantic_hash =
+               JSON_UNQUOTE(
+                 JSON_EXTRACT(
+                   ce.event_args,
+                   '$.linkType'
                  )
                )
 
@@ -1002,6 +1173,12 @@ app.get<{
         [
           config.traceforge.chainId,
           config.traceforge.contractAddress,
+          config.traceforge.chainId,
+          config.traceforge.contractAddress,
+          config.traceforge.chainId,
+          config.traceforge.contractAddress,
+          config.traceforge.chainId,
+          config.traceforge.contractAddress,
           afterEventId.toString(),
           tenantId,
           entityId,
@@ -1040,6 +1217,9 @@ app.get<{
         entityType:
           entity.entity_type,
 
+        entityTypeLabel:
+          entity.entity_type_label,
+
         metadataHash:
           entity.metadata_hash,
 
@@ -1050,6 +1230,9 @@ app.get<{
 
         currentState:
           entity.current_state,
+
+        currentStateLabel:
+          entity.current_state_label,
 
         currentCustodian:
           entity.current_custodian,
@@ -1075,6 +1258,24 @@ app.get<{
               parseEventArgs(
                 row.event_args,
               ),
+
+            eventType:
+              row.event_type,
+
+            eventTypeLabel:
+              row.event_type_label,
+
+            stateAfter:
+              row.state_after,
+
+            stateAfterLabel:
+              row.state_after_label,
+
+            linkType:
+              row.link_type,
+
+            linkTypeLabel:
+              row.link_type_label,
 
             metadataHash:
               row.metadata_hash,

@@ -77,3 +77,22 @@ A document can also be fetched directly:
 ```text
 GET /v1/documents/:contentHash
 ```
+
+## Human-readable semantics
+
+API v0.4 resolves dynamic semantic hashes through the indexer's
+`semantic_registry`.
+
+Entity responses include:
+
+- `entityTypeLabel`
+- `currentStateLabel`
+
+History events include:
+
+- `eventTypeLabel`
+- `stateAfterLabel`
+- `linkTypeLabel`
+
+The original hash is always returned. Unknown semantics are never guessed:
+their label is `null`.
