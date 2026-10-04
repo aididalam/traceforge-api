@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "signers": [
+    {
+      "organizationId": "0x6d143f0625d0664c5d27b4a6e17141c05dc24eac70cd8a20552f620264b40f5f",
+      "address": "0x7C29087bb1ec0d2A0B0ce343bBBAdE62e91C5d65",
+      "keyFile": "~/.traceforge/secrets/sandbox-distributor.key"
+    },
+    {
+      "organizationId": "0x19cb2dd8952a626d9254af21690cefaf9dba00e701bcd6805ac85a5d18cab11a",
+      "address": "0xA3f42A848A3A5675E959426e3c7258d0C7f0C019",
+      "keyFile": "~/.traceforge/secrets/sandbox-producer.key"
+    }
+  ]
+}

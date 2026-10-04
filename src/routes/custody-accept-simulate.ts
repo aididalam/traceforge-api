@@ -48,7 +48,6 @@ interface Params {
 }
 
 interface Body {
-  toOrganizationId: string;
   eventType: string;
   evidenceHash: string;
 }
@@ -81,14 +80,28 @@ function apiError(
   };
 }
 
-export async function registerCustodySimulationRoutes(
+function same(
+  a: unknown,
+  b: unknown,
+): boolean {
+  return (
+    String(
+      a,
+    ).toLowerCase() ===
+    String(
+      b,
+    ).toLowerCase()
+  );
+}
+
+export async function registerCustodyAcceptanceSimulationRoutes(
   app: FastifyInstance,
 ) {
   app.post<{
     Params: Params;
     Body: Body;
   }>(
-    "/v1/tenants/:tenantId/entities/:entityId/custody/proposals/simulate",
+    "/v1/tenants/:tenantId/entities/:entityId/custody/acceptances/simulate",
     {
       schema: {
         tags: [
@@ -130,19 +143,11 @@ export async function registerCustodySimulationRoutes(
             false,
 
           required: [
-            "toOrganizationId",
             "eventType",
             "evidenceHash",
           ],
 
           properties: {
-            toOrganizationId: {
-              type:
-                "string",
-              pattern:
-                "^0x[0-9a-fA-F]{64}$",
-            },
-
             eventType: {
               type:
                 "string",
@@ -188,7 +193,7 @@ export async function registerCustodySimulationRoutes(
 
         return apiError(
           "organization_binding_required",
-          "Custody simulation requires an organization-bound API token.",
+          "Custody acceptance simulation requires an organization-bound API token.",
         );
       }
 
@@ -199,7 +204,6 @@ export async function registerCustodySimulationRoutes(
         request.params;
 
       const {
-        toOrganizationId,
         eventType,
         evidenceHash,
       } =
@@ -209,7 +213,9 @@ export async function registerCustodySimulationRoutes(
 
       try {
         account =
-          await loadOrganizationAccount(auth.organizationId);
+          await loadOrganizationAccount(
+            auth.organizationId,
+          );
       } catch (
         error
       ) {
@@ -259,7 +265,7 @@ export async function registerCustodySimulationRoutes(
             Boolean(
               bytecode &&
               bytecode !==
-                "0x",
+              "0x",
             ),
         });
 
@@ -378,17 +384,6 @@ export async function registerCustodySimulationRoutes(
             !entity.closed,
         });
 
-        checks.push({
-          name:
-            "current_custody",
-          ok:
-            entity.exists &&
-            entity.currentCustodian.toLowerCase() ===
-              auth.organizationId.toLowerCase(),
-          detail:
-            entity.currentCustodian,
-        });
-
         const pendingExists =
           await readTraceForge(
             "hasPendingCustodyTransfer",
@@ -404,58 +399,70 @@ export async function registerCustodySimulationRoutes(
 
         checks.push({
           name:
-            "pending_custody_absent",
-          ok:
-            !pendingExists,
-        });
-
-        const destination =
-          await readTraceForge(
-            "getOrganization",
-            [
-              asBytes32(
-                toOrganizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "recipient_organization_active",
-          ok:
-            destination.exists &&
-            destination.active,
-        });
-
-        const recipientMembership =
-          await readTraceForge(
-            "isActiveTenantMember",
-            [
-              asBytes32(
-                tenantId,
-              ),
-              asBytes32(
-                toOrganizationId,
-              ),
-            ],
-          );
-
-        checks.push({
-          name:
-            "recipient_tenant_membership",
+            "pending_custody_exists",
           ok:
             Boolean(
-              recipientMembership,
+              pendingExists,
             ),
         });
 
-        checks.push({
-          name:
-            "recipient_differs_from_custodian",
-          ok:
-            toOrganizationId.toLowerCase() !==
-            auth.organizationId.toLowerCase(),
-        });
+        let pending: any =
+          null;
+
+        if (
+          pendingExists
+        ) {
+          pending =
+            await readTraceForge(
+              "getPendingCustodyTransfer",
+              [
+                asBytes32(
+                  tenantId,
+                ),
+                asBytes32(
+                  entityId,
+                ),
+              ],
+            );
+
+          checks.push({
+            name:
+              "pending_recipient",
+            ok:
+              same(
+                pending.toOrganizationId,
+                auth.organizationId,
+              ),
+            detail:
+              `toOrganizationId=${pending.toOrganizationId}`,
+          });
+
+          checks.push({
+            name:
+              "pending_source_matches_current_custody",
+            ok:
+              entity.exists &&
+              same(
+                pending.fromOrganizationId,
+                entity.currentCustodian,
+              ),
+            detail:
+              `from=${pending.fromOrganizationId} current=${entity.currentCustodian}`,
+          });
+
+          checks.push({
+            name:
+              "recipient_not_current_custodian",
+            ok:
+              entity.exists &&
+              !same(
+                auth.organizationId,
+                entity.currentCustodian,
+              ),
+            detail:
+              `currentCustodian=${entity.currentCustodian}`,
+          });
+        }
 
         const [roleRows] =
           await db.query<
@@ -526,8 +533,9 @@ export async function registerCustodySimulationRoutes(
 
         if (
           failed.length >
-          0 ||
-          !roleId
+            0 ||
+          !roleId ||
+          !pending
         ) {
           reply.code(
             409,
@@ -537,8 +545,11 @@ export async function registerCustodySimulationRoutes(
             simulated:
               false,
 
+            broadcast:
+              false,
+
             operation:
-              "proposeCustodyTransfer",
+              "acceptCustodyTransfer",
 
             tenantId,
             entityId,
@@ -551,6 +562,9 @@ export async function registerCustodySimulationRoutes(
 
             roleId,
 
+            pendingCustody:
+              pending,
+
             checks,
 
             error: {
@@ -558,7 +572,7 @@ export async function registerCustodySimulationRoutes(
                 "preflight_failed",
 
               message:
-                "One or more live-chain preflight checks failed.",
+                "One or more live-chain custody acceptance checks failed.",
             },
           };
         }
@@ -568,7 +582,6 @@ export async function registerCustodySimulationRoutes(
             tenantId as Hex,
             roleId as Hex,
             entityId as Hex,
-            toOrganizationId as Hex,
             eventType as Hex,
             evidenceHash as Hex,
           ] as const;
@@ -582,7 +595,7 @@ export async function registerCustodySimulationRoutes(
               traceForgeWriteAbi,
 
             functionName:
-              "proposeCustodyTransfer",
+              "acceptCustodyTransfer",
 
             args,
 
@@ -598,12 +611,15 @@ export async function registerCustodySimulationRoutes(
               traceForgeWriteAbi,
 
             functionName:
-              "proposeCustodyTransfer",
+              "acceptCustodyTransfer",
 
             args,
 
             account:
               account.address,
+
+            gasPrice:
+              0n,
           });
 
         return {
@@ -614,7 +630,7 @@ export async function registerCustodySimulationRoutes(
             false,
 
           operation:
-            "proposeCustodyTransfer",
+            "acceptCustodyTransfer",
 
           chainId:
             config.traceforge.chainId,
@@ -632,12 +648,33 @@ export async function registerCustodySimulationRoutes(
 
           roleId,
 
-          toOrganizationId,
           eventType,
           evidenceHash,
 
           estimatedGas:
             estimatedGas.toString(),
+
+          pendingCustody: {
+            exists:
+              true,
+
+            fromOrganizationId:
+              pending.fromOrganizationId,
+
+            toOrganizationId:
+              pending.toOrganizationId,
+
+            proposedBy:
+              pending.proposedBy,
+
+            proposedAt:
+              String(
+                pending.proposedAt,
+              ),
+          },
+
+          currentCustodian:
+            entity.currentCustodian,
 
           request: {
             to:
@@ -668,7 +705,7 @@ export async function registerCustodySimulationRoutes(
             false,
 
           operation:
-            "proposeCustodyTransfer",
+            "acceptCustodyTransfer",
 
           tenantId,
           entityId,
@@ -688,7 +725,7 @@ export async function registerCustodySimulationRoutes(
             message:
               error instanceof Error
                 ? error.message
-                : "Contract simulation failed.",
+                : "Custody acceptance simulation failed.",
           },
         };
       }

@@ -113,6 +113,10 @@ export const config = {
       process.env.TRACEFORGE_SIGNER_KEY_FILE ??
       null,
 
+    signerMapFile:
+      process.env.TRACEFORGE_SIGNER_MAP_FILE ??
+      null,
+
     broadcastEnabled:
       process.env.TRACEFORGE_BROADCAST_ENABLED ===
       "true",

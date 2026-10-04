@@ -3,6 +3,48 @@ export const traceForgeWriteAbi = [
     type:
       "function",
     name:
+      "acceptCustodyTransfer",
+    stateMutability:
+      "nonpayable",
+    inputs: [
+      {
+        name:
+          "tenantId",
+        type:
+          "bytes32",
+      },
+      {
+        name:
+          "roleId",
+        type:
+          "bytes32",
+      },
+      {
+        name:
+          "entityId",
+        type:
+          "bytes32",
+      },
+      {
+        name:
+          "eventType",
+        type:
+          "bytes32",
+      },
+      {
+        name:
+          "evidenceHash",
+        type:
+          "bytes32",
+      },
+    ],
+    outputs: [],
+  },
+
+  {
+    type:
+      "function",
+    name:
       "proposeCustodyTransfer",
     stateMutability:
       "nonpayable",

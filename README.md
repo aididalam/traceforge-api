@@ -375,3 +375,42 @@ After confirmation the stored serialized transaction is cleared.
 
 The endpoint must remain disabled until the final immutable-write checkpoint is
 reviewed.
+## API v0.11 — organization-aware signers and custody acceptance simulation
+
+v0.11 introduces an organization-to-signer mapping file:
+
+```text
+TRACEFORGE_SIGNER_MAP_FILE=~/.traceforge/config/api-signers.json
+```
+
+The mapping contains only public organization IDs, public wallet addresses, and
+paths to protected key files. Private keys remain in owner-only local secret
+files and are never stored in MySQL.
+
+Proposal simulation/broadcast routes now choose the signer from the authenticated
+API principal's organization. The legacy single signer configuration remains as
+a fallback when no signer map file is configured.
+
+New non-broadcast route:
+
+```text
+POST /v1/tenants/:tenantId/entities/:entityId/custody/acceptances/simulate
+```
+
+It requires an organization-bound `chain:write` token and verifies:
+
+- live chain ID and deployed contract code;
+- mapped signer integrity and live wallet-to-organization binding;
+- active tenant, organization, and tenant membership;
+- entity exists and is open;
+- a pending custody transfer exists;
+- the authenticated organization is the pending recipient;
+- pending source still matches the current custodian;
+- the recipient is not already the current custodian;
+- a live role grants `CUSTODY_TRANSFER`;
+- exact `acceptCustodyTransfer` simulation succeeds;
+- gas estimation succeeds.
+
+The route always returns `broadcast: false`; v0.11 does not add an acceptance
+broadcast endpoint. Broadcasting remains controlled by the existing server
+safety flag and the final immutable-write checkpoint.

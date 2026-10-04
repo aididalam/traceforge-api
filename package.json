@@ -1,6 +1,6 @@
 {
   "name": "@traceforge/api",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "TraceForge tenant-scoped HTTP API over the indexed MySQL read model",
   "main": "index.js",
   "scripts": {
@@ -10,7 +10,8 @@
     "api:migrate": "tsx src/api-migrate.ts",
     "auth:issue": "tsx src/issue-token.ts",
     "auth:list": "tsx src/list-tokens.ts",
-    "auth:revoke": "tsx src/revoke-token.ts"
+    "auth:revoke": "tsx src/revoke-token.ts",
+    "verify:custody-acceptance": "node scripts/verify-custody-acceptance.mjs"
   },
   "keywords": [],
   "author": "",
