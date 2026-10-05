@@ -6,6 +6,12 @@ Authenticated routes support tenant reads and controlled blockchain writes.
 Public routes expose read-only provenance for explicitly published entities.
 Broadcasting is disabled by default.
 
+## Parent project
+
+This repository is the `api/` submodule of
+[TraceForge](https://github.com/aididalam/traceforge).
+See the parent repository for all components, architecture and setup.
+
 ## Public tracking IDs
 
 `GET /public/v1/tracking/:trackingId` resolves an explicitly published entity
