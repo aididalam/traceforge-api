@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 
 import type {
   RowDataPacket,
@@ -32,8 +34,65 @@ import { registerGenericWriteBroadcastRoutes } from "./routes/generic-write-broa
 
 const app =
   Fastify({
-    logger: true,
+    logger: {
+      redact: {
+        paths: [
+          "req.headers.authorization",
+        ],
+        censor:
+          "[REDACTED]",
+      },
+    },
   });
+
+await app.register(
+  helmet,
+  {
+    contentSecurityPolicy:
+      false,
+  },
+);
+
+await app.register(
+  rateLimit,
+  {
+    global:
+      true,
+
+    max:
+      120,
+
+    timeWindow:
+      "1 minute",
+
+    allowList:
+      (request) =>
+        !request.url.startsWith(
+          "/v1/",
+        ),
+
+    errorResponseBuilder:
+      (_request, context) => {
+        const error =
+          new Error(
+            "Rate limit exceeded. Retry in " +
+            context.after +
+            ".",
+          ) as Error & {
+            statusCode: number;
+            code: string;
+          };
+
+        error.statusCode =
+          context.statusCode;
+
+        error.code =
+          "rate_limit_exceeded";
+
+        return error;
+      },
+  },
+);
 
 interface EntityRow
   extends RowDataPacket {
@@ -323,6 +382,28 @@ app.setErrorHandler(
     request,
     reply,
   ) => {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 429
+    ) {
+      reply
+        .code(
+          429,
+        )
+        .send(
+          apiError(
+            "rate_limit_exceeded",
+            error instanceof Error
+              ? error.message
+              : "Rate limit exceeded.",
+          ),
+        );
+
+      return;
+    }
+
     request.log.error(
       error,
     );

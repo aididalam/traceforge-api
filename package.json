@@ -26,12 +26,16 @@
     "start": "node dist/server.js",
     "verify:production-build": "npm run build && node --check dist/server.js",
     "verify:mysql-backup-restore": "node scripts/verify-mysql-backup-restore.mjs",
-    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore"
+    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore && npm run verify:security-hardening",
+    "verify:security-hardening": "node scripts/verify-security-hardening.mjs",
+    "audit:production": "npm audit --omit=dev --audit-level=high"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@fastify/helmet": "13.1.1",
+    "@fastify/rate-limit": "11.2.0",
     "@fastify/swagger": "^9.9.1",
     "@fastify/swagger-ui": "^6.1.1",
     "dotenv": "^18.0.5",
