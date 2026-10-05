@@ -67,13 +67,11 @@ await app.register(
       "1 minute",
 
     allowList:
-      (request) =>
-        !request.url.startsWith(
-          "/v1/",
-        ) &&
-        !request.url.startsWith(
-          "/public/",
-        ),
+      (request) => {
+        // Use the router's template so encoded prefixes share the same budget.
+        const routePath = request.routeOptions.url ?? request.url;
+        return !routePath.startsWith("/v1/") && !routePath.startsWith("/public/");
+      },
 
     errorResponseBuilder:
       (_request, context) => {

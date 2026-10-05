@@ -24,12 +24,18 @@ assert.ok(rateOptions && errorHandler && apiError, "Missing perimeter configurat
 const perimeter = await loadSource(`${apiError}\nexport const options = ${rateOptions};\nexport const handler = ${errorHandler};`);
 assert.equal(perimeter.options.max, 120);
 assert.equal(perimeter.options.timeWindow, "1 minute");
-for (const url of ["/public/v1/example", "/v1/example"]) assert.equal(perimeter.options.allowList({ url }), false);
-for (const url of ["/health", "/ready", "/docs", "/openapi.json"]) assert.equal(perimeter.options.allowList({ url }), true);
+for (const url of ["/public/v1/example", "/v1/example"]) assert.equal(perimeter.options.allowList({ url, routeOptions: {} }), false);
+for (const url of ["/health", "/ready", "/docs", "/openapi.json"]) assert.equal(perimeter.options.allowList({ url, routeOptions: {} }), true);
 assert.doesNotMatch(serverText, /trustProxy\s*:\s*true/);
 assert.match(serverText, /await registerPublicDiscoveryRoutes\(app,\s*\{/);
 const authText = readFileSync("src/auth.ts", "utf8");
-assert.match(authText, /!request\.url\.startsWith\(\s*"\/v1\/"/);
+// Load the actual auth hook with only its configuration/DB imports replaced.
+// Missing-credential probes must never reach the database or a real token file.
+const isolatedAuth = authText
+  .replace(/import\s*\{\s*config,?\s*\}\s*from "\.\/config\.js";/, "const config = {};")
+  .replace(/import\s*\{\s*db,?\s*\}\s*from "\.\/db\.js";/, 'const db = { query() { throw new Error("Offline auth probe accessed the DB"); } };');
+assert.doesNotMatch(isolatedAuth, /from "\.\//, "Auth isolation must replace all local imports");
+const { authHook } = await loadSource(isolatedAuth);
 
 const moduleText = readFileSync("src/routes/public-discovery.ts", "utf8");
 assert.doesNotMatch(moduleText, /offchain_documents|document_json|readFile|signer|writeContract|sendRawTransaction|\.post\(/);
@@ -71,11 +77,13 @@ const db = {
     queryCount += 1;
     assert.doesNotMatch(sql, /offchain_documents|document_json|SELECT\s+\*/i);
     if (sql.includes("FROM public_entity_publications p")) {
-      assert.match(sql, /JOIN entities e/);
+      assert.match(sql, /JOIN entities e ON e\.tenant_id = p\.tenant_id AND e\.entity_id = p\.entity_id/);
+      assert.match(sql, /WHERE p\.tenant_id = \? AND p\.entity_id = \?/);
       assert.deepEqual(values.slice(0, 4), [9009, contractAddress, 9009, contractAddress]);
       return [published && values.at(-2) === tenantId && values.at(-1) === entityId ? [fixture] : []];
     }
     assert.match(sql, /JOIN public_entity_publications p/);
+    assert.match(sql, /p\.tenant_id = JSON_UNQUOTE\(JSON_EXTRACT\(ce\.event_args, '\$\.tenantId'\)\)/);
     assert.deepEqual(values.slice(0, 4), [tenantId, entityId, 9009, contractAddress]);
     const after = BigInt(values.at(-2));
     return [published ? events.filter(e => BigInt(e.id) > after).slice(0, values.at(-1)) : []];
@@ -86,10 +94,17 @@ const eventKeys = ["eventId", "eventName", "blockNumber", "transactionHash", "tr
 const path = `/public/v1/tenants/${tenantId}/entities/${entityId}`;
 const app = Fastify({ logger: false });
 app.setErrorHandler(perimeter.handler);
+app.addHook("preHandler", authHook);
 await app.register(swagger, { openapi: { info: { title: "Public verification", version: "1" } } });
 await registerPublicDiscoveryRoutes(app, { db, chainId: 9009, contractAddress });
+app.get("/v1/probe", async () => ({ private: true }));
 await app.ready();
 try {
+  for (const prefix of ["/v1", "/v%31", "/%76%31"]) {
+    const denied = await app.inject(prefix + "/probe");
+    assert.equal(denied.statusCode, 401, "Encoded operator URL bypassed authentication");
+    assert.equal(denied.json().error.code, "authentication_required");
+  }
   const hidden = await app.inject(path);
   const missing = await app.inject(path.replace(entityId, unknownId));
   assert.equal(hidden.statusCode, 404);
@@ -113,6 +128,9 @@ try {
 
   const history = await app.inject(path + "/history");
   assert.equal(history.statusCode, 200);
+  assert.equal(history.headers["cache-control"], "no-store");
+  assert.deepEqual(Object.keys(history.json()).sort(), ["tenantId", "entityId", "entity", "events", "page"].sort());
+  assert.deepEqual(Object.keys(history.json().page).sort(), ["limit", "hasMore", "nextAfterEventId"].sort());
   assert.deepEqual(Object.keys(history.json().entity).sort(), entityKeys);
   for (const event of history.json().events) assert.deepEqual(Object.keys(event).sort(), eventKeys);
   assert.ok(!history.body.includes(sentinel));
@@ -144,7 +162,8 @@ try {
 
 // Use the actual server options and custom error handler, so a swallowed 429,
 // spoofed proxy IP, or widened allow-list fails this gate.
-for (const prefix of ["/public/v1", "/v1"]) {
+for (const prefixes of [["/public/v1", "/%70ublic/v1", "/public/v%31"], ["/v1", "/v%31", "/%76%31"]]) {
+  const prefix = prefixes[0];
   const limited = Fastify({ logger: false });
   await limited.register(rateLimit, perimeter.options);
   limited.setErrorHandler(perimeter.handler);
@@ -152,11 +171,13 @@ for (const prefix of ["/public/v1", "/v1"]) {
   limited.get("/health", async () => ({ ok: true }));
   limited.get("/ready", async () => ({ ok: true }));
   try {
-    for (let i = 0; i < 120; i += 1) assert.equal((await limited.inject(prefix + "/probe")).statusCode, 200);
-    const blocked = await limited.inject({ url: prefix + "/probe", headers: { "x-forwarded-for": "198.51.100.9" } });
-    assert.equal(blocked.statusCode, 429);
-    assert.equal(blocked.json().error.code, "rate_limit_exceeded");
-    assert.ok(blocked.headers["retry-after"]);
+    for (let i = 0; i < 120; i += 1) assert.equal((await limited.inject(prefixes[i % prefixes.length] + "/probe")).statusCode, 200);
+    for (const encoded of prefixes) {
+      const blocked = await limited.inject({ url: encoded + "/probe", headers: { "x-forwarded-for": "198.51.100.9" } });
+      assert.equal(blocked.statusCode, 429, "Encoded route bypassed the shared rate limit");
+      assert.equal(blocked.json().error.code, "rate_limit_exceeded");
+      assert.ok(blocked.headers["retry-after"]);
+    }
     for (const url of ["/health", "/ready"]) assert.equal((await limited.inject(url)).statusCode, 200);
   } finally {
     await limited.close();
@@ -186,5 +207,5 @@ for (const [args, expected] of [
 
 console.log("PUBLIC DISCOVERY VERIFIED.");
 console.log("Publication gates, response allow-lists, normalization, cursor bounds, and unauthenticated OpenAPI passed.");
-console.log("Both route namespaces return 429 at request 121; monitoring endpoints remain exempt.");
+console.log("Encoded operator URLs require auth; both route namespaces share their limits with encoded variants. Monitoring endpoints remain exempt.");
 console.log("Four direct CLI negative cases passed without accessing a database or real credentials.");

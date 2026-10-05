@@ -109,6 +109,9 @@ async function get(server, path, headers = {}) {
 
 function assertSafeHistory(result) {
   assert.equal(result.status, 200);
+  assert.equal(result.headers.get("cache-control"), "no-store");
+  assert.deepEqual(Object.keys(result.body).sort(), ["tenantId", "entityId", "entity", "events", "page"].sort());
+  assert.deepEqual(Object.keys(result.body.page).sort(), ["limit", "hasMore", "nextAfterEventId"].sort());
   assert.deepEqual(Object.keys(result.body.entity).sort(), entityKeys);
   for (const event of result.body.events) assert.deepEqual(Object.keys(event).sort(), eventKeys);
 }
@@ -136,6 +139,7 @@ async function allHistory(server, path, limit) {
 
 let baseline;
 let countsBefore;
+let relationshipCheck = "No unpublished outgoing linked fixture; relationship runtime check skipped.";
 try {
   baseline = await publicationSnapshot();
   countsBefore = await readonlyCounts();
@@ -170,10 +174,17 @@ try {
   assert.equal(hidden.status, 404);
   assert.equal(missing.status, 404);
   assert.deepEqual(hidden.body, missing.body);
-  assert.equal((await get(server, path + "/history")).status, 404);
-  assert.deepEqual((await get(server, path + "/history")).body, (await get(server, path.replace(entityId, unknownId) + "/history")).body);
+  const hiddenHistory = await get(server, path + "/history");
+  const missingHistory = await get(server, path.replace(entityId, unknownId) + "/history");
+  assert.equal(hiddenHistory.status, 404);
+  assert.equal(missingHistory.status, 404);
+  assert.deepEqual(hiddenHistory.body, missingHistory.body);
   for (const invalid of [path.replace(tenantId, "bad"), path.replace(entityId, "bad")]) assert.equal((await get(server, invalid)).status, 400);
-  assert.equal((await get(server, `/v1/tenants/${tenantId}/entities/${entityId}`)).status, 401);
+  for (const prefix of ["/v1", "/v%31", "/%76%31"]) {
+    const denied = await get(server, `${prefix}/tenants/${tenantId}/entities/${entityId}`);
+    assert.equal(denied.status, 401, "Encoded operator URL bypassed authentication");
+    assert.equal(denied.body.error.code, "authentication_required");
+  }
   assert.equal((await get(server, `/v1/tenants/${tenantId}/entities/${entityId}`, { Authorization: "Bearer " + sentinel })).status, 401);
 
   const upperIds = ["--tenant", "0x" + tenantId.slice(2).toUpperCase(), "--entity", "0x" + entityId.slice(2).toUpperCase()];
@@ -184,6 +195,7 @@ try {
   assert.equal(detail.status, 200);
   assert.deepEqual(Object.keys(detail.body).sort(), entityKeys);
   assert.equal(detail.headers.get("cache-control"), "no-store");
+  for (const prefix of ["/%70ublic/v1", "/public/v%31"]) assert.deepEqual((await get(server, path.replace("/public/v1", prefix))).body, detail.body);
   const upperPath = path.replace(tenantId, "0x" + tenantId.slice(2).toUpperCase()).replace(entityId, "0x" + entityId.slice(2).toUpperCase());
   assert.deepEqual((await get(server, upperPath)).body, detail.body);
   const all = await allHistory(server, path, 100);
@@ -192,9 +204,23 @@ try {
   assert.equal(new Set(all.map(e => e.eventId)).size, all.length);
   for (const suffix of ["?limit=0", "?limit=101", "?afterEventId=-1", "?afterEventId=18446744073709551616"]) assert.equal((await get(server, path + "/history" + suffix)).status, 400);
 
+  // An orphan publication under another tenant must not grant access to the
+  // fixture's entity or events. This tests the real SQL tenant joins.
+  const orphan = { tenant_id: unknownId, entity_id: entityId };
+  assert.equal((await query("SELECT entity_id FROM entities WHERE tenant_id = ? AND entity_id = ?", [orphan.tenant_id, orphan.entity_id])).length, 0);
+  assert.equal((await query("SELECT entity_id FROM public_entity_publications WHERE tenant_id = ? AND entity_id = ?", [orphan.tenant_id, orphan.entity_id])).length, 0);
+  ownPublications.push(orphan);
+  await query("INSERT INTO public_entity_publications (tenant_id, entity_id) VALUES (?, ?)", [orphan.tenant_id, orphan.entity_id]);
+  for (const suffix of ["", "/history"]) {
+    const denied = await get(server, path.replace(tenantId, orphan.tenant_id) + suffix);
+    assert.equal(denied.status, 404, "Publication exposed another tenant's entity");
+    assert.deepEqual(denied.body, hidden.body);
+  }
+  await query("DELETE FROM public_entity_publications WHERE tenant_id = ? AND entity_id = ?", [orphan.tenant_id, orphan.entity_id]);
+
   // Independently derive expected visibility from event identifiers and the
   // publication snapshot, instead of reproducing the route's SQL expression.
-  const raw = await query(`SELECT id, event_name,
+  const raw = await query(`SELECT CAST(id AS CHAR) AS id, event_name,
       JSON_UNQUOTE(JSON_EXTRACT(event_args, '$.entityId')) AS entity_id,
       JSON_UNQUOTE(JSON_EXTRACT(event_args, '$.sourceEntityId')) AS source_id,
       JSON_UNQUOTE(JSON_EXTRACT(event_args, '$.targetEntityId')) AS target_id
@@ -223,6 +249,7 @@ try {
     assert.ok(!JSON.stringify(linked).includes(counterpart.entity_id), "Relationship endpoint IDs leaked");
     await cli([...partnerArgs, "--unpublish"], "PUBLIC ENTITY UNPUBLISHED.", true);
     assert.deepEqual(await allHistory(server, path, 100), all);
+    relationshipCheck = "Relationship publication visibility and endpoint privacy passed.";
   }
   const openapi = (await get(server, "/openapi.json")).body;
   for (const suffix of ["", "/history"]) assert.deepEqual(openapi.paths["/public/v1/tenants/{tenantId}/entities/{entityId}" + suffix].get.security, []);
@@ -234,18 +261,22 @@ try {
   await stopApi(server);
 
   const limiter = await startApi();
-  for (let i = 0; i < 120; i += 1) assert.equal((await get(limiter, path)).status, 404);
-  const blocked = await get(limiter, path, { "x-forwarded-for": "198.51.100.8" });
-  assert.equal(blocked.status, 429);
-  assert.equal(blocked.body.error.code, "rate_limit_exceeded");
-  assert.ok(blocked.headers.get("retry-after"));
-  assert.equal((await get(limiter, `/v1/tenants/${tenantId}/entities/${entityId}`)).status, 429);
+  const variants = [path, path.replace("/public/v1", "/%70ublic/v1"), path.replace("/public/v1", "/public/v%31")];
+  for (let i = 0; i < 120; i += 1) assert.equal((await get(limiter, variants[i % variants.length])).status, 404);
+  for (const variant of variants) {
+    const blocked = await get(limiter, variant, { "x-forwarded-for": "198.51.100.8" });
+    assert.equal(blocked.status, 429, "Encoded public route bypassed the shared rate limit");
+    assert.equal(blocked.body.error.code, "rate_limit_exceeded");
+    assert.ok(blocked.headers.get("retry-after"));
+  }
+  for (const prefix of ["/v1", "/v%31", "/%76%31"]) assert.equal((await get(limiter, `${prefix}/tenants/${tenantId}/entities/${entityId}`)).status, 429);
   for (const monitoring of ["/health", "/ready"]) assert.equal((await get(limiter, monitoring)).status, 200);
   await stopApi(limiter);
   assert.deepEqual(await publicationSnapshot(), baseline);
   assert.deepEqual(await readonlyCounts(), countsBefore);
   console.log("PUBLIC DISCOVERY INTEGRATION PASSED.");
-  console.log("CLI negatives/idempotency, publication lifecycle, response privacy, relationship opt-in, cursors, auth protection, OpenAPI, 429 handling and graceful shutdown passed.");
+  console.log("CLI negatives/idempotency, publication lifecycle, cross-tenant isolation, response privacy, cursors, encoded-URL auth/rate limits, OpenAPI and graceful shutdown passed.");
+  console.log(relationshipCheck);
   console.log("Only temporary publication rows were changed; all were cleaned up. No operator key/token files were read and no broadcast endpoint was called.");
 } finally {
   let cleanupError;

@@ -788,6 +788,8 @@ mutation endpoint.
 
 `/public/*` and `/v1/*` share the existing 120 requests per minute per IP limit.
 `/health` and `/ready` remain exempt. Proxy headers are not blindly trusted.
+Auth and rate limits use the matched route template, so percent-encoded prefixes
+such as `/v%31/` and `/%70ublic/` cannot bypass those checks.
 QR payloads should contain a stable public URL, never an operator credential.
 
 Verification requires Node 22.13 or newer:

@@ -118,8 +118,12 @@ export async function authHook(
   request: FastifyRequest,
   reply: FastifyReply,
 ) {
+  // Fastify resolves percent-encoded static paths before invoking the hook.
+  // Protect the matched route, including URLs such as /v%31/tenants/....
+  const routePath = request.routeOptions.url ?? request.url;
+
   if (
-    !request.url.startsWith(
+    !routePath.startsWith(
       "/v1/",
     )
   ) {
