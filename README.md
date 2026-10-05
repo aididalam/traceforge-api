@@ -901,3 +901,55 @@ MySQL database. It starts isolated API processes with broadcasting forced off,
 changes only temporary publication rows, preserves existing publications, and
 checks cleanup and graceful shutdown. It never loads operator key/token files
 or calls a broadcast endpoint. Root CI wiring is a separate follow-up.
+
+## Business accounts and dashboard API
+
+The separate `/operator/v1/*` namespace provides business-account access and
+read views. Existing `/v1/*` bearer authentication and real tokens are unchanged.
+Operator sessions grant viewing access only and cannot call chain write routes.
+
+```text
+POST /operator/v1/activate
+POST /operator/v1/login
+POST /operator/v1/logout
+GET  /operator/v1/me
+GET  /operator/v1/products?after=0&limit=50
+GET  /operator/v1/products/:productId/history?after=0&limit=50
+GET  /operator/v1/businesses
+GET  /operator/v1/operations
+```
+
+Migration `008_operator_accounts.sql` stores unique-email accounts bound to a
+workspace/business, hashed single-use invitations and hashed expiring sessions.
+Every authenticated read verifies active account, workspace, business and
+membership. Product/history queries use that account's workspace; operation
+status reads additionally require its business. Products need not be public.
+Responses use explicit display fields; source documents, raw event arguments,
+credentials, signed transactions and operation payloads are not returned.
+
+After separately authorized migration/service activation:
+
+```bash
+npm run operator:invite -- --tenant <bytes32> --organization <bytes32> --email <email> --output <new-private-file>
+```
+
+The CLI verifies current active membership, saves a 24-hour invitation to a new
+owner-only file (0600), refuses overwriting, and does not print the invitation.
+Provide it privately to the intended user, who uses the UI's invitation form.
+No email is sent automatically. Existing tokens/signers are untouched.
+
+Passwords use salted scrypt; login failures are generic, five failed attempts
+lock an account for ten minutes, and per-route rate limits bound login/activation.
+There are at most two simultaneous password hashes in each API process. Sessions
+expire after 30 minutes and logout revokes them. Membership/account disablement
+immediately invalidates subsequent reads. API error handling omits SQL and
+credential-bearing error details. Password reset, MFA, administrator UI and
+multiple workspace memberships per user remain follow-ups.
+
+`verify:operator-dashboard` is the secret-free offline CI gate.
+`test:operator-dashboard` after build uses only connection-local temporary model,
+account/invitation/session tables; live data, schema and migration ledger are
+verified unchanged. Identical empty document/semantic mirror fixtures handle
+MySQL's restriction on referencing a temporary table twice in one query.
+Migration 008 is prepared and tested, **not applied live**. See
+[dashboard design, tests and activation](https://github.com/aididalam/traceforge/blob/main/docs/operator-dashboard.md).

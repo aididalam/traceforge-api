@@ -27,6 +27,7 @@ import { registerPublicDiscoveryRoutes } from "./routes/public-discovery.js";
 import { registerPublicTrackingRoutes } from "./routes/public-tracking.js";
 import { registerPublicShortLinkRoutes } from "./routes/public-short-links.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerOperatorRoutes } from "./routes/operator.js";
 import { registerPreflightRoutes } from "./routes/preflight.js";
 import { registerCustodySimulationRoutes } from "./routes/custody-simulate.js";
 import { registerCustodyBroadcastRoutes } from "./routes/custody-broadcast.js";
@@ -41,6 +42,9 @@ const app =
       redact: {
         paths: [
           "req.headers.authorization",
+          "req.headers.cookie",
+          "req.body.password",
+          "req.body.invitationCode",
         ],
         censor:
           "[REDACTED]",
@@ -72,7 +76,7 @@ await app.register(
       (request) => {
         // Use the router's template so encoded prefixes share the same budget.
         const routePath = request.routeOptions.url ?? request.url;
-        return !routePath.startsWith("/v1/") && !routePath.startsWith("/public/");
+        return !routePath.startsWith("/v1/") && !routePath.startsWith("/public/") && !routePath.startsWith("/operator/");
       },
 
     errorResponseBuilder:
@@ -368,6 +372,7 @@ await app.register(
         version:
           "0.15.0",
       },
+      components: { securitySchemes: { operatorSession: { type: "http", scheme: "bearer", description: "Short-lived business account session, held by the operator gateway." } } },
     },
   },
 );
@@ -1454,6 +1459,7 @@ app.get<{
 );
 
 await registerAuthRoutes(app);
+await registerOperatorRoutes(app, { db, chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress });
 await registerPreflightRoutes(app);
 await registerCustodySimulationRoutes(app);
 await registerCustodyBroadcastRoutes(app);
