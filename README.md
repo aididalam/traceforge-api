@@ -6,6 +6,34 @@ Authenticated routes support tenant reads and controlled blockchain writes.
 Public routes expose read-only provenance for explicitly published entities.
 Broadcasting is disabled by default.
 
+## Public tracking IDs
+
+`GET /public/v1/tracking/:trackingId` resolves an explicitly published entity
+to `{ trackingId, tenantId, entityId }`. The public UI uses `/track/<trackingId>`;
+the existing two-ID public detail/history endpoints remain compatible.
+
+Migration `005_public_entity_tracking_ids.sql` creates the registry. IDs are
+random bytes32 values, globally unique within the registry and stable per
+tenant/entity pair. Collision/concurrent issuance retries preserve existing
+IDs. Unpublishing hides the resolver's response but retains the ID for reuse.
+
+After migrations are authorized/applied and the updated API is running:
+
+```bash
+npm run public:publish -- --tenant <bytes32> --entity <bytes32>
+npm run public:tracking-id -- --tenant <bytes32> --entity <bytes32>
+```
+
+Issuance requires an existing published entity; it does not publish or write to
+the blockchain. Unknown/unpublished/missing entities share a public 404. Public
+responses omit private documents and credentials. No public mutation route is
+provided. API migration 004 and the deployed contract are unchanged.
+
+`npm run verify:public-tracking` is the offline CI check. The optional local
+`npm run test:public-tracking` (after build) uses connection-local temporary
+tables only; it does not apply migration 005 to live schema or change live rows.
+Migration 005 is prepared and verified, pending permanent DB authorization.
+
 ## Development
 
 ```bash

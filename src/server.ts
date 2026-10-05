@@ -24,6 +24,7 @@ import {
 
 import { registerDiscoveryRoutes } from "./routes/discovery.js";
 import { registerPublicDiscoveryRoutes } from "./routes/public-discovery.js";
+import { registerPublicTrackingRoutes } from "./routes/public-tracking.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPreflightRoutes } from "./routes/preflight.js";
 import { registerCustodySimulationRoutes } from "./routes/custody-simulate.js";
@@ -1460,6 +1461,7 @@ await registerCustodyAcceptanceBroadcastRoutes(app);
 await registerGenericWriteSimulationRoutes(app);
 await registerGenericWriteBroadcastRoutes(app);
 await registerDiscoveryRoutes(app);
+await registerPublicTrackingRoutes(app, { db });
 await registerPublicDiscoveryRoutes(app, {
   db,
   chainId: config.traceforge.chainId,
