@@ -21,7 +21,12 @@
     "verify:provenance-schema": "node scripts/verify-generic-provenance-validator.mjs",
     "verify:generic-terminal-guards": "node scripts/verify-generic-terminal-guards.mjs",
     "verify:write-journal-readiness": "node scripts/verify-write-journal-readiness.mjs",
-    "verify:operational-readiness": "npm run typecheck && npm run verify:generic-broadcast-disabled && npm run verify:write-journal-readiness && npm run verify:generic-write-simulations && npm run verify:generic-terminal-guards && npm run test:acceptance && npm run provenance:validate && npm run verify:provenance-schema"
+    "verify:operational-readiness": "npm run typecheck && npm run verify:generic-broadcast-disabled && npm run verify:write-journal-readiness && npm run verify:generic-write-simulations && npm run verify:generic-terminal-guards && npm run test:acceptance && npm run provenance:validate && npm run verify:provenance-schema",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "verify:production-build": "npm run build && node --check dist/server.js",
+    "verify:mysql-backup-restore": "node scripts/verify-mysql-backup-restore.mjs",
+    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore"
   },
   "keywords": [],
   "author": "",
