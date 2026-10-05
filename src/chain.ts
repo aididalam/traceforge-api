@@ -38,8 +38,7 @@ export async function readTraceForge(
     | "hasCapability"
     | "entityExists"
     | "getEntity"
-    | "hasPendingCustodyTransfer"
-    | "getPendingCustodyTransfer",
+    | "getCustodyVersion",
   args: readonly unknown[],
 ): Promise<any> {
   return chainClient.readContract({

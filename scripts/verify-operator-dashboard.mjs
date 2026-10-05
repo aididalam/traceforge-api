@@ -30,10 +30,10 @@ const query=async(sql,args=[])=>{
  if(sql.includes("FROM operator_invitations i")){const row=invitations.get(args[0]);return [[row&&row.email===args[1]&&!row.used&&row.expires>Date.now()&&account.membership_active?{invitation_hash:args[0]}:undefined].filter(Boolean)];}
  if(sql.startsWith("INSERT INTO operator_accounts"))return [{affectedRows:1}];
  if(sql.startsWith("UPDATE operator_invitations")){invitations.get(args[0]).used=true;return [{affectedRows:1}];}
- if(sql.includes("FROM entities e")){assert.ok(args.includes(tenant));assert.ok(!args.includes(h("12")));return [[{entity_id:product,created_cursor:"9007199254741001",closed:0,created_at:"1791024000",current_custodian:org,type_label:"Batch",status_label:"Packed",name:"Demo Tea",description:null,units:"100",packaging:"Packed",quality:null,revision:null,holder_name:"Demo Producer",private_document:"PRIVATE_SENTINEL"}]];}
- if(sql.includes("FROM chain_events ce")){assert.deepEqual(args.slice(0,4),[9009,"0x"+"55".repeat(20),"0",tenant]);return [[{id:"9007199254741001",event_name:"EntityCreated",label:null,occurred_at:"1791024000",organization_id:org,from_id:null,to_id:null,transaction_hash:h("34"),private_document:"PRIVATE_SENTINEL"}]];}
- if(sql.includes("FROM tenant_memberships m")){assert.equal(args[0],tenant);return [[{organization_id:org,name:"Demo Producer",type:"Producer",active:1}]];}
- if(sql.includes("FROM chain_write_operations")){assert.deepEqual(args,[tenant,org]);assert.doesNotMatch(sql,/serialized|request_json|error_message|idempotency/);return [[{operation_id:"12345678-1234-4234-8234-123456789def",entity_id:product,operation_name:"recordTrace",status:"CONFIRMED",transaction_hash:h("34"),block_number:"9007199254741003",created_at:new Date("2026-10-04T00:00:00Z"),updated_at:new Date("2026-10-04T00:00:01Z"),private_document:"PRIVATE_SENTINEL"}]];}
+ if(sql.includes("FROM entities e")){assert.ok(args.includes(org));assert.ok(!args.includes(h("12")));return [[{entity_id:product,created_cursor:"9007199254741001",closed:0,created_at:"1791024000",current_custodian:org,type_label:"Batch",status_label:"Packed",name:"Demo Tea",description:null,units:"100",packaging:"Packed",quality:null,revision:null,holder_name:"Demo Producer",private_document:"PRIVATE_SENTINEL"}]];}
+ if(sql.includes("FROM chain_events ce")){assert.deepEqual(args.slice(0,4),[9009,"0x"+"55".repeat(20),"0",product]);return [[{id:"9007199254741001",event_name:"EntityCreated",label:null,occurred_at:"1791024000",organization_id:org,from_id:null,to_id:null,transaction_hash:h("34"),private_document:"PRIVATE_SENTINEL"}]];}
+ if(sql.includes("FROM organizations o")){return [[{organization_id:org,name:"Demo Producer",type:"Producer",active:1}]];}
+ if(sql.includes("FROM chain_write_operations")){assert.deepEqual(args,[org]);assert.doesNotMatch(sql,/serialized|request_json|error_message|idempotency/);return [[{operation_id:"12345678-1234-4234-8234-123456789def",entity_id:product,operation_name:"recordTrace",status:"CONFIRMED",transaction_hash:h("34"),block_number:"9007199254741003",created_at:new Date("2026-10-04T00:00:00Z"),updated_at:new Date("2026-10-04T00:00:01Z"),private_document:"PRIVATE_SENTINEL"}]];}
  throw Error("Unhandled synthetic query");
 };
 let committed=0,rolledBack=0;
@@ -51,11 +51,11 @@ try{
  const unknown=await post("/login",{email:"unknown@example.test",password:"Synthetic wrong value"});
  assert.equal(bad.statusCode,401);assert.deepEqual(bad.json(),unknown.json());
  const login=await post("/login",{email:account.email,password});assert.equal(login.statusCode,200);
- const body=login.json();assert.match(body.sessionToken,/^tfos_/);assert.equal(body.user.tenantId,tenant);assert.equal(body.user.access,"read");assert.ok(!login.body.includes(passwordDigest));
+ const body=login.json();assert.match(body.sessionToken,/^tfos_/);assert.equal(body.user.tenantId,tenant);assert.equal(body.user.access,"manage");assert.ok(!login.body.includes(passwordDigest));
  const headers={authorization:"Bearer "+body.sessionToken};
  for(const suffix of ["/me","/products","/businesses","/operations","/products/"+product+"/history"]){const response=await app.inject({url:prefix+suffix,headers});assert.equal(response.statusCode,200);assert.equal(response.headers["cache-control"],"no-store");assert.ok(!response.body.includes("PRIVATE_SENTINEL"));assert.ok(!response.body.includes("sessionToken"));}
  for(const suffix of ["/products?tenantId="+h("12"),"/products?after=18446744073709551616","/products?limit=101","/products?limit=1&limit=2","/me?token=synthetic"]){assert.equal((await app.inject({url:prefix+suffix,headers})).statusCode,400);}
- for(const field of ["active","tenant_active","organization_active","membership_active"]){account[field]=0;assert.equal((await app.inject({url:prefix+"/me",headers})).statusCode,401);account[field]=1;}
+ for(const field of ["active","organization_active"]){account[field]=0;assert.equal((await app.inject({url:prefix+"/me",headers})).statusCode,401);account[field]=1;}
  await post("/logout",{},headers);assert.equal((await app.inject({url:prefix+"/me",headers})).statusCode,401);
  // Invitation binding, single use, expiry and membership gates.
  const invitation=credential("tfoi");invitations.set(digest(invitation),{email:"new@example.test",used:false,expires:Date.now()+60000});

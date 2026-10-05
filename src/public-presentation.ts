@@ -78,8 +78,7 @@ export async function savePublicPresentation(db: Reader, tenantId: string, entit
   if (rows[0].metadata_hash.toLowerCase() !== profile.metadataHash) throw new Error("Product information reference has changed; review the details again.");
   for (const org of profile.organizations) {
     const [organizations] = await db.query<RowDataPacket[]>(
-      `SELECT o.metadata_hash FROM organizations o JOIN tenant_memberships m ON m.organization_id=o.organization_id
-       WHERE m.tenant_id=? AND o.organization_id=? FOR UPDATE`, [tenant, org.id]);
+      `SELECT o.metadata_hash FROM organizations o WHERE o.organization_id=? FOR UPDATE`, [org.id]);
     if (organizations.length !== 1 || organizations[0].metadata_hash.toLowerCase() !== org.metadataHash) {
       throw new Error("Business reference does not match this workspace's indexed records.");
     }
@@ -122,9 +121,8 @@ export async function readPublicPresentation(db: Reader, tenantId: string, entit
   if (!profile.organizations.length) return { ...empty, productInfo };
   const [organizations] = await db.query<OrganizationRow[]>(
     `SELECT o.organization_id, o.metadata_hash FROM organizations o
-     JOIN tenant_memberships m ON m.organization_id = o.organization_id
-     WHERE m.tenant_id = ? AND o.organization_id IN (${profile.organizations.map(() => "?").join(",")})`,
-    [tenantId, ...profile.organizations.map(org => org.id)]);
+     WHERE o.organization_id IN (${profile.organizations.map(() => "?").join(",")})`,
+    profile.organizations.map(org => org.id));
   const currentHashes = new Map(organizations.map(org => [org.organization_id.toLowerCase(), org.metadata_hash.toLowerCase()]));
   return { productInfo, organizations: new Map(profile.organizations
     .filter(org => currentHashes.get(org.id) === org.metadataHash).map(org => [org.id, org])) };

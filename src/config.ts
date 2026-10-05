@@ -107,6 +107,7 @@ export const config = {
     ),
 
   traceforge: {
+    businessWalletDirectory: process.env.TRACEFORGE_BUSINESS_WALLET_DIRECTORY ?? null,
     chainId:
       positiveInteger(
         "TRACEFORGE_CHAIN_ID",

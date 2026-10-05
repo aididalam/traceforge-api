@@ -27,7 +27,7 @@ const validator =
 const source =
   resolve(
     process.cwd(),
-    "../contracts/deployments/9009/operations/entity-sandbox-batch-001-generic-record-trace-proof-001.json",
+    "test/fixtures/synthetic-generic-proof.json",
   );
 
 const temp =

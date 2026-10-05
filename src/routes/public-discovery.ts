@@ -288,24 +288,18 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
               CASE ce.event_name
                 WHEN 'EntityCreated' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.createdAt'))
                 WHEN 'TraceRecorded' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.timestamp'))
-                WHEN 'CustodyTransferProposed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.proposedAt'))
-                WHEN 'CustodyTransferred' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.acceptedAt'))
-                WHEN 'CustodyTransferCancelled' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.cancelledAt'))
-                WHEN 'CustodyTransferCancelledByAdmin' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.cancelledAt'))
+                WHEN 'CustodyClaimed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.timestamp'))
                 WHEN 'EntityLinkCreated' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.createdAt'))
                 WHEN 'EntityLinkStatusChanged' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.updatedAt'))
                 WHEN 'EntityClosed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.closedAt'))
               END AS occurred_at,
               CASE ce.event_name
-                WHEN 'CustodyTransferProposed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.fromOrganizationId'))
-                WHEN 'CustodyTransferCancelled' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.fromOrganizationId'))
-                WHEN 'CustodyTransferred' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId'))
-                WHEN 'CustodyTransferCancelledByAdmin' THEN NULL
+                WHEN 'CustodyClaimed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId'))
                 ELSE JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.organizationId'))
               END AS organization_id,
-              CASE WHEN ce.event_name IN ('CustodyTransferProposed','CustodyTransferred','CustodyTransferCancelled','CustodyTransferCancelledByAdmin')
+              CASE WHEN ce.event_name = 'CustodyClaimed'
                 THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.fromOrganizationId')) END AS from_organization_id,
-              CASE WHEN ce.event_name IN ('CustodyTransferProposed','CustodyTransferred','CustodyTransferCancelled','CustodyTransferCancelledByAdmin')
+              CASE WHEN ce.event_name = 'CustodyClaimed'
                 THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId')) END AS to_organization_id
        FROM chain_events ce
        JOIN public_entity_publications p ON p.tenant_id = ? AND p.entity_id = ?

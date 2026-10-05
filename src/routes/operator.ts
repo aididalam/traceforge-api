@@ -3,6 +3,7 @@ import type { Pool, RowDataPacket } from "mysql2/promise";
 import { randomUUID } from "node:crypto";
 import { AuthenticationBusy, credential, digest, emailPattern, hashPassword, invitationPattern, sessionLifetime, verifyPassword } from "../operator-credentials.js";
 import { businesses, operations, products, productHistory, text } from "../operator-data.js";
+import type { businessActions } from "../business.js";
 import type { OperatorPrincipal } from "../operator-data.js";
 declare module "fastify" { interface FastifyContextConfig { operatorPublic?: boolean } }
 
@@ -14,15 +15,15 @@ const productParams = { type:"object",additionalProperties:false,required:["prod
 const loginBody = { type:"object",additionalProperties:false,required:["email","password"],properties:{email:{type:"string",minLength:3,maxLength:254},password:{type:"string",minLength:1,maxLength:128}} } as const;
 const failure = (code:string,message:string)=>({error:{code,message}});
 const principal=(row:RowDataPacket):OperatorPrincipal=>({accountId:row.account_id,email:row.email,name:row.display_name,
-  tenantId:row.tenant_id,organizationId:row.organization_id,workspaceName:text(row.workspace_name),organizationName:text(row.organization_name),access:"read"});
-const eligible = (row:RowDataPacket) => Boolean(row.active && row.tenant_active && row.organization_active && row.membership_active);
+  tenantId:row.tenant_id,organizationId:row.organization_id,workspaceName:text(row.workspace_name),organizationName:text(row.organization_name),access:"manage"});
+const eligible = (row:RowDataPacket) => Boolean(row.active && row.organization_active);
 const accountSelect = `SELECT a.account_id,a.email,a.display_name,a.tenant_id,a.organization_id,a.active,
   a.password_digest,a.locked_until, t.active AS tenant_active,o.active AS organization_active,m.active AS membership_active,
   JSON_UNQUOTE(JSON_EXTRACT(td.document_json,'$.name')) AS workspace_name,
   JSON_UNQUOTE(JSON_EXTRACT(od.document_json,'$.name')) AS organization_name
-  FROM operator_accounts a JOIN tenants t ON t.tenant_id=a.tenant_id
+  FROM operator_accounts a LEFT JOIN tenants t ON t.tenant_id=a.tenant_id
   JOIN organizations o ON o.organization_id=a.organization_id
-  JOIN tenant_memberships m ON m.tenant_id=a.tenant_id AND m.organization_id=a.organization_id
+  LEFT JOIN tenant_memberships m ON m.tenant_id=a.tenant_id AND m.organization_id=a.organization_id
   LEFT JOIN offchain_documents td ON td.content_hash=t.metadata_hash AND td.document_kind='tenant'
   LEFT JOIN offchain_documents od ON od.content_hash=o.metadata_hash AND od.document_kind='organization'`;
 const context=(request:FastifyRequest)=>contexts.get(request)!;
@@ -32,7 +33,7 @@ function pagination(query:{after?:string;limit?:string}) {
   return {after,limit};
 }
 
-export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<Pool,"query"|"getConnection">;chainId:number;contractAddress:string}) {
+export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<Pool,"query"|"getConnection">;chainId:number;contractAddress:string;actions?:typeof businessActions}) {
   const {db}=deps,scope:[number,string]=[deps.chainId,deps.contractAddress.toLowerCase()];
   await app.register(async operator=>{
     operator.addHook("onRequest",async(_request,reply)=>{reply.header("Cache-Control","no-store");});
@@ -42,12 +43,16 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
       const paging=route.endsWith("/products")||route.endsWith("/history");
       if([...query.keys()].some(key=>!paging||!["after","limit"].includes(key))||query.getAll("after").length>1||query.getAll("limit").length>1)
         return reply.code(400).send(failure("invalid_request","Invalid request parameters."));
-      const allowed=route.endsWith("/login")?["email","password"]:route.endsWith("/activate")?["email","password","name","invitationCode"]:[];
+      const allowed=route.endsWith("/signup")?["email","password","name","businessName","businessType","publicProfile"]:route.endsWith("/create")?["name","description","publish","idempotencyKey"]:route.endsWith("/receive")?["version","confirmed","idempotencyKey"]:route.endsWith("/close")?["reason","confirmed","idempotencyKey"]:route.endsWith("/login")?["email","password"]:route.endsWith("/activate")?["email","password","name","invitationCode"]:[];
       if(request.body&&typeof request.body==='object'&&Object.keys(request.body).some(key=>!allowed.includes(key)))
         return reply.code(400).send(failure("invalid_request","Check the information provided."));
     });
     operator.setErrorHandler((error,_request,reply)=>{
-      const problem=error as {code?:string;statusCode?:number;validation?:unknown};
+      const problem=error as {code?:string;status?:number;statusCode?:number;validation?:unknown};
+      if (problem.status && problem.code && ["writes_disabled","invalid_request","business_busy","request_conflict","operation_failed",
+        "operation_not_allowed","chain_unavailable","receipt_unverified","signup_unavailable","account_unavailable","product_not_found",
+        "business_not_ready","receipt_confirmation_required","close_confirmation_required"].includes(problem.code))
+        return reply.code(problem.status).send(failure(problem.code, "The operation could not be completed. Refresh and check the product."));
       if(problem.statusCode===429||error instanceof AuthenticationBusy) return reply.header("Retry-After","60").code(429).send(failure("rate_limit_exceeded","Please retry later."));
       if(problem.validation||problem.statusCode===400) return reply.code(400).send(failure("invalid_request","Check the information provided."));
       // Database errors can include credential-bearing SQL parameters. Never log them.
@@ -62,6 +67,18 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
         WHERE s.session_hash=? AND s.revoked=FALSE AND s.expires_at>CURRENT_TIMESTAMP LIMIT 1`,[digest(token)]);
       if(!rows[0]||!eligible(rows[0]))return reply.code(401).send(failure("authentication_required","Sign in to continue."));
       contexts.set(request,principal(rows[0]));
+    });
+    operator.post<{Body:{email:string;password:string;name:string;businessName:string;businessType:string;publicProfile:boolean}}>("/signup", {
+      config:{operatorPublic:true,rateLimit:{max:5,timeWindow:"1 minute"}},bodyLimit:4096,
+      schema:{tags:["operator-access"],security:[],querystring:noQuery,body:{...loginBody,
+        required:["email","password","name","businessName","businessType","publicProfile"],properties:{...loginBody.properties,
+          password:{type:"string",minLength:12,maxLength:128},name:{type:"string",minLength:1,maxLength:120},
+          businessName:{type:"string",minLength:1,maxLength:120},businessType:{type:"string",enum:["Producer","Distributor","Transporter","Warehouse","Shop","Other business"]},
+          publicProfile:{type:"boolean"}}}}},async(request,reply)=>{
+      if(!emailPattern.test(request.body.email.trim().toLowerCase())||![request.body.name,request.body.businessName].every(value=>value.trim()))
+        return reply.code(400).send(failure("invalid_request","Check your name and email address."));
+      if(!deps.actions)return reply.code(503).send(failure("signup_unavailable","Business signup is temporarily unavailable."));
+      return deps.actions.signup(request.body);
     });
     operator.post<{Body:{email:string;password:string}}>("/login",{
       config:{operatorPublic:true,rateLimit:{max:10,timeWindow:"1 minute"}},bodyLimit:4096,
@@ -120,6 +137,30 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
       await db.query("UPDATE operator_sessions SET revoked=TRUE WHERE session_hash=?",[digest(token)]);
       return {signedOut:true};
     });
+    const keySchema={type:"string",minLength:8,maxLength:64,pattern:"^[A-Za-z0-9_-]+$"};
+    const confirmation={type:"boolean",const:true};
+    const actionUnavailable=(reply:import("fastify").FastifyReply)=>reply.code(503).send(failure("writes_disabled","Product operations are temporarily unavailable."));
+    operator.post<{Body:{name:string;description:string;publish:boolean;idempotencyKey:string}}>("/products/create",{
+      bodyLimit:4096,schema:{tags:["operator-dashboard"],querystring:noQuery,body:{type:"object",additionalProperties:false,
+        required:["name","description","publish","idempotencyKey"],properties:{name:{type:"string",minLength:1,maxLength:240},
+          description:{type:"string",maxLength:2000},publish:{type:"boolean"},idempotencyKey:keySchema}}}},async(request,reply)=>{
+      if(!request.body.name.trim())return reply.code(400).send(failure("invalid_request","Enter a product name."));
+      return deps.actions?deps.actions.create(context(request),request.body):actionUnavailable(reply);
+    });
+    operator.get<{Params:{trackingId:string}}>("/receive/:trackingId",{schema:{tags:["operator-dashboard"],querystring:noQuery,
+      params:{type:"object",additionalProperties:false,required:["trackingId"],properties:{trackingId:{type:"string",pattern:"^(0x[0-9a-fA-F]{64}|[0123456789abcdefghjkmnpqrstvwxyzABCDEFGHJKMNPQRSTVWXYZ]{12})$"}}}}},
+      async(request,reply)=>deps.actions?deps.actions.lookup(context(request),request.params.trackingId):actionUnavailable(reply));
+    operator.post<{Params:{productId:string};Body:{version:string;confirmed:boolean;idempotencyKey:string}}>("/products/:productId/receive",{
+      bodyLimit:4096,schema:{tags:["operator-dashboard"],querystring:noQuery,params:productParams,body:{type:"object",additionalProperties:false,
+        required:["version","confirmed","idempotencyKey"],properties:{version:{type:"string",pattern:"^(0|[1-9][0-9]{0,19})$"},confirmed:confirmation,idempotencyKey:keySchema}}}},
+      async(request,reply)=>{
+        if(BigInt(request.body.version)>18446744073709551615n)return reply.code(400).send(failure("invalid_request","Refresh the product before receiving."));
+        return deps.actions?deps.actions.receive(context(request),request.params.productId.toLowerCase(),request.body):actionUnavailable(reply);
+      });
+    operator.post<{Params:{productId:string};Body:{reason:"Sold"|"Lost"|"Damaged"|"Disposed";confirmed:boolean;idempotencyKey:string}}>("/products/:productId/close",{
+      bodyLimit:4096,schema:{tags:["operator-dashboard"],querystring:noQuery,params:productParams,body:{type:"object",additionalProperties:false,
+        required:["reason","confirmed","idempotencyKey"],properties:{reason:{type:"string",enum:["Sold","Lost","Damaged","Disposed"]},confirmed:confirmation,idempotencyKey:keySchema}}}},
+      async(request,reply)=>deps.actions?deps.actions.close(context(request),request.params.productId.toLowerCase(),request.body):actionUnavailable(reply));
     operator.get<{Querystring:{after?:string;limit?:string}}>("/products",{schema:{tags:["operator-dashboard"],security:[{operatorSession:[]}],querystring:pageQuery}},async(request,reply)=>{
       let page;try{page=pagination(request.query);}catch{return reply.code(400).send(failure("invalid_request","Invalid pagination."));}
       return products(db,context(request),scope,page.after,page.limit);

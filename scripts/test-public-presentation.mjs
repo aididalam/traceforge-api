@@ -51,8 +51,7 @@ try {
   await assert.rejects(savePublicPresentation(connection,tenant,entity,{...profile,organizations:[{...producer,metadataHash:h("89")}]}),/Business reference/);
   await assert.rejects(savePublicPresentation(connection,h("ef"),entity,profile),/Publish the indexed product/);
   const kinds = [
-    ["EntityCreated","createdAt"], ["TraceRecorded","timestamp"], ["CustodyTransferProposed","proposedAt"],
-    ["CustodyTransferred","acceptedAt"], ["CustodyTransferCancelled","cancelledAt"], ["CustodyTransferCancelledByAdmin","cancelledAt"],
+    ["EntityCreated","createdAt"], ["TraceRecorded","timestamp"], ["CustodyClaimed","timestamp"],
     ["EntityLinkCreated","createdAt"], ["EntityLinkStatusChanged","updatedAt"], ["EntityClosed","closedAt"],
   ];
   for (let i=0; i<kinds.length; i++) {
@@ -79,22 +78,20 @@ try {
   assert.equal(body.entity.currentHolder.name,distributor.name);
   assert.equal(body.events.length,kinds.length);
   for (let i=0;i<kinds.length;i++) assert.equal(body.events[i].occurredAt,String(1790000000+i*60),kinds[i][0]+" timestamp extraction failed");
-  assert.equal(body.events[2].organization.name,producer.name,"Proposal must be attributed to sender");
-  assert.equal(body.events[3].organization.name,distributor.name,"Accepted transfer must be attributed to receiver");
-  assert.equal(body.events[5].organization,null,"Admin cancellation must not invent a business actor");
-  assert.deepEqual(body.events[3].transfer, { from:{ id:producer.id,name:producer.name,type:producer.type },to:{ id:distributor.id,name:distributor.name,type:distributor.type } });
+  assert.equal(body.events[2].organization.name,distributor.name,"Receipt must be attributed to the receiver");
+  assert.deepEqual(body.events[2].transfer, { from:{ id:producer.id,name:producer.name,type:producer.type },to:{ id:distributor.id,name:distributor.name,type:distributor.type } });
   assert.ok(!response.body.includes(sentinel));
   assert.ok(!response.body.includes("0x"+"99".repeat(20)));
   const first=(await app.inject(path+"/history?limit=3")).json();
   assert.equal(first.page.nextAfterEventId,"9007199254740995");
   const next=(await app.inject(path+"/history?limit=3&afterEventId="+first.page.nextAfterEventId)).json();
-  assert.equal(next.events[0].eventName,"CustodyTransferred");
+  assert.equal(next.events[0].eventName,"EntityLinkCreated");
   await query("UPDATE entities SET metadata_hash=? WHERE tenant_id=? AND entity_id=?",[h("56"),tenant,entity]);
   assert.equal((await app.inject(path)).json().productInfo,null,"Stale product details exposed");
   await query("UPDATE organizations SET metadata_hash=? WHERE organization_id=?",[h("89"),distributor.id]);
   assert.equal((await app.inject(path)).json().currentHolder.name,null,"Stale business name exposed");
   await query("DELETE FROM tenant_memberships WHERE tenant_id=? AND organization_id=?",[tenant,producer.id]);
-  assert.equal((await app.inject(path+"/history")).json().events[0].organization.name,null,"Other-workspace business name exposed");
+  assert.equal((await app.inject(path+"/history")).json().events[0].organization.name,producer.name,"A verified public business profile must remain visible across workspaces");
   await query("DELETE FROM public_entity_publications WHERE tenant_id=? AND entity_id=?",[tenant,entity]);
   const hidden=await app.inject(path);
   const missing=await app.inject(path.replace(entity,h("ef")));

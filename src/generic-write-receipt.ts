@@ -828,19 +828,6 @@ async function verifyOperation(
         );
       }
 
-      const pending =
-        await readTraceForge(
-          "hasPendingCustodyTransfer",
-          [
-            asBytes32(
-              operation.tenant_id,
-            ),
-            asBytes32(
-              operation.entity_id,
-            ),
-          ],
-        );
-
       const entity =
         await readTraceForge(
           "getEntity",
@@ -856,8 +843,7 @@ async function verifyOperation(
 
       if (
         !entity.exists ||
-        !entity.closed ||
-        pending
+        !entity.closed
       ) {
         throw new Error(
           "Entity close readback does not match terminal state.",
@@ -878,12 +864,7 @@ async function verifyOperation(
             entity.metadataHash,
         },
 
-        pendingCustody: {
-          exists:
-            Boolean(
-              pending,
-            ),
-        },
+
       };
     }
 

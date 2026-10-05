@@ -272,33 +272,7 @@ async function closeChecks(
       checks,
     );
 
-  const pending =
-    await readTraceForge(
-      "hasPendingCustodyTransfer",
-      [
-        asBytes32(
-          tenantId,
-        ),
-        asBytes32(
-          entityId,
-        ),
-      ],
-    );
-
-  checks.push({
-    name:
-      "pending_custody_forbidden",
-    ok:
-      !pending,
-  });
-
-  return {
-    ...context,
-    pendingCustody:
-      Boolean(
-        pending,
-      ),
-  };
+  return context;
 }
 
 export const genericMutationSpecs:

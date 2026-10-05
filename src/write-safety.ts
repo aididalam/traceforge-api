@@ -48,12 +48,6 @@ interface EvaluateWritePrincipalSafetyInput {
   capabilityCheckName?: string;
 }
 
-interface RecipientSafetyInput {
-  tenantId: string;
-  toOrganizationId: string;
-  checks: WriteCheck[];
-}
-
 export function sameNormalized(
   a: unknown,
   b: unknown,
@@ -213,44 +207,6 @@ export async function evaluateWritePrincipalSafety(
       organization.active,
   });
 
-  const membership =
-    await readTraceForge(
-      "getTenantMembership",
-      [
-        asBytes32(
-          tenantId,
-        ),
-        asBytes32(
-          organizationId,
-        ),
-      ],
-    );
-
-  const activeMember =
-    await readTraceForge(
-      "isActiveTenantMember",
-      [
-        asBytes32(
-          tenantId,
-        ),
-        asBytes32(
-          organizationId,
-        ),
-      ],
-    );
-
-  checks.push({
-    name:
-      "tenant_membership",
-
-    ok:
-      membership.exists &&
-      membership.active &&
-      Boolean(
-        activeMember,
-      ),
-  });
-
   const wallet =
     await readTraceForge(
       "getWalletBinding",
@@ -289,6 +245,49 @@ export async function evaluateWritePrincipalSafety(
 
     detail:
       `wallet=${account.address} walletOrganization=${wallet.organizationId}`,
+  });
+
+  if (capabilityIndex === 4 || capabilityIndex === 6) {
+    // Receive and Close use global business identity, independent of the production workspace.
+    return { roleId: "0x" + "0".repeat(64), checks };
+  }
+
+  const membership =
+    await readTraceForge(
+      "getTenantMembership",
+      [
+        asBytes32(
+          tenantId,
+        ),
+        asBytes32(
+          organizationId,
+        ),
+      ],
+    );
+
+  const activeMember =
+    await readTraceForge(
+      "isActiveTenantMember",
+      [
+        asBytes32(
+          tenantId,
+        ),
+        asBytes32(
+          organizationId,
+        ),
+      ],
+    );
+
+  checks.push({
+    name:
+      "tenant_membership",
+
+    ok:
+      membership.exists &&
+      membership.active &&
+      Boolean(
+        activeMember,
+      ),
   });
 
   const [roleRows] =
@@ -363,80 +362,4 @@ export async function evaluateWritePrincipalSafety(
     roleId,
     checks,
   };
-}
-
-export async function appendRecipientSafetyChecks(
-  input: RecipientSafetyInput,
-): Promise<void> {
-  const {
-    tenantId,
-    toOrganizationId,
-    checks,
-  } =
-    input;
-
-  const destination =
-    await readTraceForge(
-      "getOrganization",
-      [
-        asBytes32(
-          toOrganizationId,
-        ),
-      ],
-    );
-
-  checks.push({
-    name:
-      "recipient_organization_exists",
-
-    ok:
-      destination.exists,
-  });
-
-  checks.push({
-    name:
-      "recipient_organization_active",
-
-    ok:
-      destination.exists &&
-      destination.active,
-  });
-
-  const membership =
-    await readTraceForge(
-      "getTenantMembership",
-      [
-        asBytes32(
-          tenantId,
-        ),
-        asBytes32(
-          toOrganizationId,
-        ),
-      ],
-    );
-
-  const activeMember =
-    await readTraceForge(
-      "isActiveTenantMember",
-      [
-        asBytes32(
-          tenantId,
-        ),
-        asBytes32(
-          toOrganizationId,
-        ),
-      ],
-    );
-
-  checks.push({
-    name:
-      "recipient_tenant_membership",
-
-    ok:
-      membership.exists &&
-      membership.active &&
-      Boolean(
-        activeMember,
-      ),
-  });
 }

@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "network": {
+    "chainId": 9009
+  },
+  "contract": {
+    "address": "0x0000000000000000000000000000000000000001",
+    "runtimeBytecodeHash": "0x0000000000000000000000000000000000000000000000000000000000000002"
+  },
+  "entity": {
+    "entityId": "0x0000000000000000000000000000000000000000000000000000000000000003",
+    "organizationId": "0x0000000000000000000000000000000000000000000000000000000000000004",
+    "roleId": "0x0000000000000000000000000000000000000000000000000000000000000005",
+    "signerAddress": "0x0000000000000000000000000000000000000006"
+  },
+  "operation": {
+    "name": "recordTrace",
+    "eventType": "0x0000000000000000000000000000000000000000000000000000000000000007",
+    "evidenceHash": "0x0000000000000000000000000000000000000000000000000000000000000008",
+    "evidenceFile": "bootstrap/synthetic-evidence.json",
+    "timestamp": "1791137149"
+  },
+  "apiWrite": {
+    "operationId": "12345678-1234-4234-8234-123456789abc",
+    "idempotencyKey": "synthetic-generic-proof",
+    "nonce": "7",
+    "gasEstimate": "59991",
+    "gasLimit": "71990",
+    "status": "CONFIRMED"
+  },
+  "transaction": {
+    "hash": "0x0000000000000000000000000000000000000000000000000000000000000009",
+    "blockNumber": "41561",
+    "gasUsed": "59173",
+    "receiptStatus": "success",
+    "logCount": 1
+  },
+  "indexedEvent": {
+    "eventId": "47",
+    "eventName": "TraceRecorded",
+    "logIndex": 0,
+    "stateAfter": "0x000000000000000000000000000000000000000000000000000000000000000a",
+    "metadataHashAfter": "0x000000000000000000000000000000000000000000000000000000000000000b"
+  },
+  "verification": {
+    "receiptConfirmed": true,
+    "journalConfirmed": true,
+    "serializedTransactionCleared": true,
+    "indexerReconciled": true,
+    "traceEvidenceResolved": true,
+    "traceMetadataResolved": true,
+    "traceResolution": {
+      "metadata": {
+        "resolved": 10,
+        "total": 10,
+        "unresolved": 0
+      },
+      "evidence": {
+        "resolved": 10,
+        "total": 10,
+        "unresolved": 0
+      }
+    },
+    "stateUnchanged": true,
+    "metadataUnchanged": true,
+    "custodyUnchanged": true,
+    "entityRemainsOpen": true,
+    "finalState": "0x000000000000000000000000000000000000000000000000000000000000000a",
+    "finalMetadataHash": "0x000000000000000000000000000000000000000000000000000000000000000b",
+    "finalCustodianOrganizationId": "0x0000000000000000000000000000000000000000000000000000000000000004",
+    "broadcastDisabledAfterWrite": true
+  }
+}

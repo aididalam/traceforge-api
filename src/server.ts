@@ -27,12 +27,9 @@ import { registerPublicDiscoveryRoutes } from "./routes/public-discovery.js";
 import { registerPublicTrackingRoutes } from "./routes/public-tracking.js";
 import { registerPublicShortLinkRoutes } from "./routes/public-short-links.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { businessActions } from "./business.js";
 import { registerOperatorRoutes } from "./routes/operator.js";
 import { registerPreflightRoutes } from "./routes/preflight.js";
-import { registerCustodySimulationRoutes } from "./routes/custody-simulate.js";
-import { registerCustodyBroadcastRoutes } from "./routes/custody-broadcast.js";
-import { registerCustodyAcceptanceSimulationRoutes } from "./routes/custody-accept-simulate.js";
-import { registerCustodyAcceptanceBroadcastRoutes } from "./routes/custody-accept-broadcast.js";
 import { registerGenericWriteSimulationRoutes } from "./routes/generic-write-simulate.js";
 import { registerGenericWriteBroadcastRoutes } from "./routes/generic-write-broadcast.js";
 
@@ -1459,12 +1456,8 @@ app.get<{
 );
 
 await registerAuthRoutes(app);
-await registerOperatorRoutes(app, { db, chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress });
+await registerOperatorRoutes(app, { db, chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress, actions: businessActions });
 await registerPreflightRoutes(app);
-await registerCustodySimulationRoutes(app);
-await registerCustodyBroadcastRoutes(app);
-await registerCustodyAcceptanceSimulationRoutes(app);
-await registerCustodyAcceptanceBroadcastRoutes(app);
 await registerGenericWriteSimulationRoutes(app);
 await registerGenericWriteBroadcastRoutes(app);
 await registerDiscoveryRoutes(app);

@@ -36,8 +36,8 @@ const writer = { async query(sql, values) {
     return [writable ? [{metadata_hash:productHash}] : []];
   }
   if (sql.startsWith("SELECT o.metadata_hash")) {
-    assert.equal(values[0],tenant); assert.match(sql,/m\.tenant_id=\?/);
-    return [[{metadata_hash:values[1]===producer.id ? producer.metadataHash : orgHash}]];
+    assert.match(sql,/o\.organization_id=\?/); assert.doesNotMatch(sql,/tenant_memberships/);
+    return [[{metadata_hash:values[0]===producer.id ? producer.metadataHash : orgHash}]];
   }
   if (sql.includes("INSERT INTO public_entity_presentations")) {
     assert.deepEqual(values,[tenant,entity,hash,JSON.stringify(profile.productInfo),JSON.stringify(profile.organizations)]);
@@ -72,17 +72,15 @@ const db = { async query(sql, values) {
     return [[{ metadata_hash: hash, product_info: brokenProfile ? { private: sentinel } : profile.productInfo, organization_profiles: profile.organizations }]];
   }
   if (sql.includes("FROM organizations o")) {
-    assert.match(sql, /m\.tenant_id = \?/);
-    assert.deepEqual(values, [tenant, producer.id, distributor.id]);
+    assert.doesNotMatch(sql,/tenant_memberships/);
+    assert.deepEqual(values, [producer.id, distributor.id]);
     return [[{ organization_id: producer.id, metadata_hash: producer.metadataHash },
       { organization_id: distributor.id, metadata_hash: staleOrganization ? otherHash : distributor.metadataHash }]];
   }
   assert.match(sql, /JOIN public_entity_publications p/);
-  assert.match(sql, /WHEN 'CustodyTransferred'.*acceptedAt/);
-  assert.match(sql, /WHEN 'CustodyTransferProposed'.*proposedAt/);
-  assert.match(sql, /WHEN 'CustodyTransferCancelledByAdmin' THEN NULL/);
-  return [[{ id: "9007199254740993", event_name: "CustodyTransferred", block_number: "123", transaction_hash: hash,
-    transaction_index: 0, log_index: 0, event_type: hash, event_type_label: "CustodyTransferAccepted", state_after: null,
+  assert.match(sql, /WHEN 'CustodyClaimed'.*timestamp/);
+  return [[{ id: "9007199254740993", event_name: "CustodyClaimed", block_number: "123", transaction_hash: hash,
+    transaction_index: 0, log_index: 0, event_type: hash, event_type_label: "Product received", state_after: null,
     state_after_label: null, link_type: null, link_type_label: null, metadata_hash: null, evidence_hash: hash,
     occurred_at: "1790000060", organization_id: distributor.id, from_organization_id: producer.id, to_organization_id: distributor.id,
     event_args: { private: sentinel, actor: "0x" + "99".repeat(20) },

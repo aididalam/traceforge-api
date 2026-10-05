@@ -1,4 +1,5 @@
 import {
+  access,
   readFile,
   stat,
 } from "node:fs/promises";
@@ -260,6 +261,21 @@ export async function loadOrganizationAccount(
       "organizationId",
       organizationId,
     );
+
+  if (config.traceforge.businessWalletDirectory) {
+    const filename = resolve(expandHome(config.traceforge.businessWalletDirectory), normalizedOrganizationId + ".key");
+    let exists = true;
+    try { await access(filename); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      exists = false;
+    }
+    if (exists) {
+      await requireOwnerOnlyFile(filename, "Business wallet key");
+      const key = (await readFile(filename, "utf8")).trim();
+      if (!/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error("Invalid business wallet key.");
+      return privateKeyToAccount(key as `0x${string}`);
+    }
+  }
 
   const signerMap =
     await loadSignerMap();
