@@ -18,7 +18,8 @@
     "verify:generic-broadcast-disabled": "node scripts/verify-generic-broadcast-disabled.mjs",
     "provenance:validate:custody": "node scripts/validate-custody-provenance.mjs",
     "provenance:validate:generic": "node scripts/validate-generic-provenance.mjs",
-    "verify:provenance-schema": "node scripts/verify-generic-provenance-validator.mjs"
+    "verify:provenance-schema": "node scripts/verify-generic-provenance-validator.mjs",
+    "verify:generic-terminal-guards": "node scripts/verify-generic-terminal-guards.mjs"
   },
   "keywords": [],
   "author": "",
