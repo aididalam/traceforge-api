@@ -254,7 +254,7 @@ test(
 
     assert.equal(
       body.currentStateLabel,
-      "Packed",
+      "Quality Approved",
     );
 
     assert.equal(
@@ -264,7 +264,7 @@ test(
 
     assert.equal(
       body.metadataHash,
-      batchMetadataHash,
+      "0xfbab6097420bf6b760926aa5c1e0806211ab26e164be66029611bdb652665368",
     );
 
     assert.equal(
@@ -274,7 +274,7 @@ test(
 
     assert.equal(
       body.metadata?.revision,
-      2,
+      3,
     );
   },
 );
@@ -377,7 +377,7 @@ test(
 
     assert.equal(
       body.entity.currentStateLabel,
-      "Packed",
+      "Quality Approved",
     );
 
     const byEventId =

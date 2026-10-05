@@ -133,9 +133,9 @@ async function createChecks(
   >,
   checks: WriteCheck[],
 ) {
-  const entity =
+  const exists =
     await readTraceForge(
-      "getEntity",
+      "entityExists",
       [
         asBytes32(
           tenantId,
@@ -150,12 +150,14 @@ async function createChecks(
     name:
       "entity_absent",
     ok:
-      !entity.exists,
+      !exists,
   });
 
   return {
     existingEntity:
-      entity.exists,
+      Boolean(
+        exists,
+      ),
   };
 }
 

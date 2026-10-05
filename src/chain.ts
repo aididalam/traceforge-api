@@ -36,6 +36,7 @@ export async function readTraceForge(
     | "getTenantMembership"
     | "isActiveTenantMember"
     | "hasCapability"
+    | "entityExists"
     | "getEntity"
     | "hasPendingCustodyTransfer"
     | "getPendingCustodyTransfer",

@@ -300,6 +300,37 @@ export const traceForgeReadAbi = [
     type:
       "function",
     name:
+      "entityExists",
+    stateMutability:
+      "view",
+    inputs: [
+      {
+        name:
+          "tenantId",
+        type:
+          "bytes32",
+      },
+      {
+        name:
+          "entityId",
+        type:
+          "bytes32",
+      },
+    ],
+    outputs: [
+      {
+        name:
+          "",
+        type:
+          "bool",
+      },
+    ],
+  },
+
+  {
+    type:
+      "function",
+    name:
       "getEntity",
     stateMutability:
       "view",
