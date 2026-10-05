@@ -40,6 +40,36 @@ provided. API migration 004 and the deployed contract are unchanged.
 tables only; it does not apply migration 005 to live schema or change live rows.
 Migration 005 is prepared and verified, pending permanent DB authorization.
 
+## Short product links
+
+`GET /public/v1/short-links/:shortCode` resolves a 12-character tracking code to
+`{ shortCode, trackingId, tenantId, entityId }` for an existing published product.
+The UI opens `/s/<code>` directly and keeps that URL. Full tracking links remain
+compatible. Unknown, unpublished and missing products share a 404; malformed
+codes/queries return 400. There is no redirect or public issuance endpoint.
+
+Migration `007_public_entity_short_links.sql` reserves one stable random code
+per Tracking ID, with unique constraints and bounded collision/concurrency
+retries. Unpublishing keeps its code reserved; republishing restores it. This
+database mapping does not change blockchain data. Include both registries in
+backups; blockchain reindexing cannot reconstruct these random assignments.
+
+After the migrations and updated API are activated, issue a code for an existing
+public Tracking ID:
+
+```bash
+npm run public:short-link -- --tracking-id <bytes32>
+# Optional HTTPS site origin prints a complete link; it is never fetched.
+npm run public:short-link -- --tracking-id <bytes32> --origin https://traceforge.example
+```
+
+`traceforge.example` is a reserved example, not a deployed site.
+`npm run verify:public-short-links` is an offline CI check.
+`npm run test:public-short-links` after build checks real MySQL temporary tables
+and verifies unchanged live state. Migration 007 is prepared, tested and
+**not applied live** under the current temporary-write-only restriction. See
+[short-link design and activation](https://github.com/aididalam/traceforge/blob/main/docs/public-short-links.md).
+
 ## Development
 
 ```bash

@@ -26,7 +26,7 @@
     "start": "node dist/server.js",
     "verify:production-build": "npm run build && node --check dist/server.js",
     "verify:mysql-backup-restore": "node scripts/verify-mysql-backup-restore.mjs",
-    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore && npm run verify:security-hardening && npm run verify:token-expiry && npm run verify:public-discovery && npm run verify:public-tracking && npm run verify:public-presentation",
+    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore && npm run verify:security-hardening && npm run verify:token-expiry && npm run verify:public-discovery && npm run verify:public-tracking && npm run verify:public-presentation && npm run verify:public-short-links",
     "verify:security-hardening": "node scripts/verify-security-hardening.mjs",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "verify:token-expiry": "node scripts/verify-token-expiry.mjs",
@@ -39,7 +39,10 @@
     "test:public-tracking": "node scripts/test-public-tracking.mjs",
     "public:details": "tsx src/set-public-details.ts",
     "verify:public-presentation": "node scripts/verify-public-presentation.mjs",
-    "test:public-presentation": "node scripts/test-public-presentation.mjs"
+    "test:public-presentation": "node scripts/test-public-presentation.mjs",
+    "public:short-link": "tsx src/issue-public-short-link.ts",
+    "verify:public-short-links": "node scripts/verify-public-short-links.mjs",
+    "test:public-short-links": "node scripts/test-public-short-links.mjs"
   },
   "keywords": [],
   "author": "",
