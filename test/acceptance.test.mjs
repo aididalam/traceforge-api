@@ -425,9 +425,14 @@ test(
 test(
   "tenant discovery returns entities, organizations, and relationships",
   async () => {
+    const item002Id =
+      "0xb6a021b5def89a8029c720c6418d60bdaf595d2ef2c1d0d4bab7f521d2bdc834";
+
     const entities =
       await getJson(
-        `/v1/tenants/${tenantId}/entities?limit=10`,
+        "/v1/tenants/" +
+        tenantId +
+        "/entities?limit=10",
       );
 
     assert.equal(
@@ -435,25 +440,42 @@ test(
       200,
     );
 
+    const byEntityId =
+      new Map(
+        entities.body.entities.map(
+          (entity) => [
+            entity.entityId,
+            entity,
+          ],
+        ),
+      );
+
     assert.equal(
-      entities.body.entities.length,
-      2,
+      byEntityId.get(
+        batchId
+      )?.entityTypeLabel,
+      "Batch",
     );
 
-    assert.deepEqual(
-      entities.body.entities.map(
-        (entity) =>
-          entity.entityTypeLabel,
-      ),
-      [
-        "Batch",
-        "Item",
-      ],
+    assert.equal(
+      byEntityId.get(
+        itemId
+      )?.entityTypeLabel,
+      "Item",
+    );
+
+    assert.equal(
+      byEntityId.get(
+        item002Id
+      )?.entityTypeLabel,
+      "Item",
     );
 
     const organizations =
       await getJson(
-        `/v1/tenants/${tenantId}/organizations?limit=10`,
+        "/v1/tenants/" +
+        tenantId +
+        "/organizations?limit=10",
       );
 
     assert.equal(
@@ -461,25 +483,33 @@ test(
       200,
     );
 
+    const organizationSlugs =
+      new Set(
+        organizations.body.organizations.map(
+          (organization) =>
+            organization.metadata?.slug,
+        ),
+      );
+
     assert.equal(
-      organizations.body.organizations.length,
-      2,
+      organizationSlugs.has(
+        "sandbox-producer"
+      ),
+      true,
     );
 
-    assert.deepEqual(
-      organizations.body.organizations.map(
-        (organization) =>
-          organization.metadata?.slug,
+    assert.equal(
+      organizationSlugs.has(
+        "sandbox-distributor"
       ),
-      [
-        "sandbox-producer",
-        "sandbox-distributor",
-      ],
+      true,
     );
 
     const relationships =
       await getJson(
-        `/v1/tenants/${tenantId}/relationships?limit=10`,
+        "/v1/tenants/" +
+        tenantId +
+        "/relationships?limit=10",
       );
 
     assert.equal(
@@ -487,81 +517,175 @@ test(
       200,
     );
 
-    assert.equal(
-      relationships.body.relationships.length,
-      1,
-    );
+    const byTargetEntityId =
+      new Map(
+        relationships.body.relationships.map(
+          (relationship) => [
+            relationship.targetEntityId,
+            relationship,
+          ],
+        ),
+      );
 
     assert.equal(
-      relationships.body.relationships[0].linkTypeLabel,
+      byTargetEntityId.get(
+        itemId
+      )?.linkTypeLabel,
       "Contains",
     );
 
     assert.equal(
-      relationships.body.relationships[0].active,
+      byTargetEntityId.get(
+        itemId
+      )?.active,
       true,
+    );
+
+    assert.equal(
+      byTargetEntityId.get(
+        item002Id
+      )?.linkTypeLabel,
+      "Contains",
+    );
+
+    assert.equal(
+      byTargetEntityId.get(
+        item002Id
+      )?.active,
+      false,
     );
   },
 );
 
 test(
-  "entity discovery cursor returns the second page exactly once",
+  "entity discovery cursor visits every entity exactly once",
   async () => {
-    const first =
-      await getJson(
-        `/v1/tenants/${tenantId}/entities?limit=1`,
+    const item002Id =
+      "0xb6a021b5def89a8029c720c6418d60bdaf595d2ef2c1d0d4bab7f521d2bdc834";
+
+    const seenEntityIds =
+      new Set();
+
+    const seenCursors =
+      new Set();
+
+    let afterEventId =
+      null;
+
+    let pages =
+      0;
+
+    while (true) {
+      const path =
+        afterEventId === null
+          ? (
+              "/v1/tenants/" +
+              tenantId +
+              "/entities?limit=1"
+            )
+          : (
+              "/v1/tenants/" +
+              tenantId +
+              "/entities?limit=1&afterEventId=" +
+              encodeURIComponent(
+                afterEventId
+              )
+            );
+
+      const page =
+        await getJson(
+          path
+        );
+
+      assert.equal(
+        page.response.status,
+        200,
       );
 
-    assert.equal(
-      first.response.status,
-      200,
-    );
+      assert.equal(
+        page.body.entities.length,
+        1,
+      );
+
+      const entityId =
+        page.body.entities[0].entityId;
+
+      assert.equal(
+        seenEntityIds.has(
+          entityId
+        ),
+        false,
+      );
+
+      seenEntityIds.add(
+        entityId
+      );
+
+      pages +=
+        1;
+
+      assert.ok(
+        pages < 100,
+        "Entity pagination exceeded 100 pages.",
+      );
+
+      if (
+        !page.body.page.hasMore
+      ) {
+        assert.equal(
+          page.body.page.nextAfterEventId,
+          null,
+        );
+
+        break;
+      }
+
+      const nextCursor =
+        page.body.page.nextAfterEventId;
+
+      assert.ok(
+        nextCursor
+      );
+
+      assert.equal(
+        seenCursors.has(
+          nextCursor
+        ),
+        false,
+      );
+
+      seenCursors.add(
+        nextCursor
+      );
+
+      afterEventId =
+        nextCursor;
+    }
 
     assert.equal(
-      first.body.entities.length,
-      1,
-    );
-
-    assert.equal(
-      first.body.page.hasMore,
+      seenEntityIds.has(
+        batchId
+      ),
       true,
     );
 
-    assert.ok(
-      first.body.page.nextAfterEventId,
-    );
-
-    const cursor =
-      first.body.page.nextAfterEventId;
-
-    const second =
-      await getJson(
-        `/v1/tenants/${tenantId}/entities?limit=1&afterEventId=${cursor}`,
-      );
-
     assert.equal(
-      second.response.status,
-      200,
+      seenEntityIds.has(
+        itemId
+      ),
+      true,
     );
 
     assert.equal(
-      second.body.entities.length,
-      1,
+      seenEntityIds.has(
+        item002Id
+      ),
+      true,
     );
 
     assert.equal(
-      second.body.entities[0].entityId,
-      itemId,
-    );
-
-    assert.equal(
-      second.body.page.hasMore,
-      false,
-    );
-
-    assert.equal(
-      second.body.page.nextAfterEventId,
-      null,
+      seenEntityIds.size,
+      pages,
     );
   },
 );
