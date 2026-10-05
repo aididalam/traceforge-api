@@ -53,6 +53,7 @@ const requiredFragments = [
   "timeWindow:\n      \"1 minute\"",
   "!request.url.startsWith(",
   "\"/v1/\"",
+  "\"/public/\"",
   "rate_limit_exceeded",
 ];
 
@@ -104,5 +105,5 @@ console.log(
   "Security headers are enabled."
 );
 console.log(
-  "Only /v1/* is globally rate limited."
+  "/v1/* and /public/* are globally rate limited."
 );

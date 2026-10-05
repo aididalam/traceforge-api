@@ -23,6 +23,7 @@ import {
 } from "./auth.js";
 
 import { registerDiscoveryRoutes } from "./routes/discovery.js";
+import { registerPublicDiscoveryRoutes } from "./routes/public-discovery.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPreflightRoutes } from "./routes/preflight.js";
 import { registerCustodySimulationRoutes } from "./routes/custody-simulate.js";
@@ -69,6 +70,9 @@ await app.register(
       (request) =>
         !request.url.startsWith(
           "/v1/",
+        ) &&
+        !request.url.startsWith(
+          "/public/",
         ),
 
     errorResponseBuilder:
@@ -1458,6 +1462,11 @@ await registerCustodyAcceptanceBroadcastRoutes(app);
 await registerGenericWriteSimulationRoutes(app);
 await registerGenericWriteBroadcastRoutes(app);
 await registerDiscoveryRoutes(app);
+await registerPublicDiscoveryRoutes(app, {
+  db,
+  chainId: config.traceforge.chainId,
+  contractAddress: config.traceforge.contractAddress,
+});
 
 app.get(
   "/openapi.json",

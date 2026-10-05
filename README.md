@@ -2,7 +2,9 @@
 
 Tenant-scoped HTTP API over the TraceForge indexed MySQL read model.
 
-The API is read-only. It does not submit blockchain transactions.
+Authenticated routes support tenant reads and controlled blockchain writes.
+Public routes expose read-only provenance for explicitly published entities.
+Broadcasting is disabled by default.
 
 ## Development
 
@@ -723,3 +725,84 @@ counts.
 
 The public provenance contract and secret boundary are documented in
 `docs/provenance-v1.md`.
+
+## v0.30A — opt-in public entity discovery
+
+Consumers can read explicitly published provenance without a bearer token:
+
+```text
+GET /public/v1/tenants/:tenantId/entities/:entityId
+GET /public/v1/tenants/:tenantId/entities/:entityId/history
+```
+
+Both IDs must be bytes32 hex values. Missing and unpublished entities return the
+same `404 entity_not_found` response. Malformed identifiers/pagination return
+400. Responses use `Cache-Control: no-store` so clients recheck publication
+after an entity is unpublished.
+
+Entity responses contain only:
+
+```text
+tenantId, entityId, entityType, entityTypeLabel, metadataHash,
+currentState, currentStateLabel, currentCustodian, closed, createdAt, closedAt
+```
+
+History returns the same safe entity projection plus:
+
+```text
+{
+  tenantId,
+  entityId,
+  entity,
+  events: [{
+    eventId, eventName, blockNumber, transactionHash, transactionIndex,
+    logIndex, eventType, eventTypeLabel, stateAfter, stateAfterLabel,
+    linkType, linkTypeLabel, metadataHash, evidenceHash
+  }],
+  page: { limit, hasMore, nextAfterEventId }
+}
+```
+
+History is ordered by ascending event ID. `limit` defaults to 50 and must be
+between 1 and 100. `afterEventId` is an unsigned 64-bit integer cursor. IDs are
+returned as decimal strings to preserve precision. Use `nextAfterEventId` when
+`hasMore` is true; it is null on the final page.
+
+Full metadata/evidence documents, raw event arguments, wallet/role details and
+relationship endpoint IDs are excluded. Relationship domain events are included
+only when both linked entities are explicitly published. Trace evidence for the
+requested entity remains available as hashes. Publication does not grant access
+to the authenticated `/v1/documents/:contentHash` endpoint.
+
+Publication is managed locally by an operator:
+
+```text
+npm run public:publish -- --tenant <tenant-id> --entity <entity-id>
+npm run public:unpublish -- --tenant <tenant-id> --entity <entity-id>
+```
+
+Publishing requires an existing indexed entity and is idempotent. Unpublishing
+is also idempotent. Migration 004 adds the opt-in publication table; it is
+unchanged from its original local application. There is no public publication
+mutation endpoint.
+
+`/public/*` and `/v1/*` share the existing 120 requests per minute per IP limit.
+`/health` and `/ready` remain exempt. Proxy headers are not blindly trusted.
+QR payloads should contain a stable public URL, never an operator credential.
+
+Verification requires Node 22.13 or newer:
+
+```text
+npm run verify:public-discovery
+npm run verify:production-build
+npm run test:public-discovery
+```
+
+The verifier uses offline fixtures to test the real route and perimeter code,
+including privacy allow-lists, publication denial, cursor limits, OpenAPI and
+rate limiting. It also invokes CLI flag/identifier negatives directly without
+database credentials. The local integration test needs the existing migrated
+MySQL database. It starts isolated API processes with broadcasting forced off,
+changes only temporary publication rows, preserves existing publications, and
+checks cleanup and graceful shutdown. It never loads operator key/token files
+or calls a broadcast endpoint. Root CI wiring is a separate follow-up.

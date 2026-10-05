@@ -26,10 +26,14 @@
     "start": "node dist/server.js",
     "verify:production-build": "npm run build && node --check dist/server.js",
     "verify:mysql-backup-restore": "node scripts/verify-mysql-backup-restore.mjs",
-    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore && npm run verify:security-hardening && npm run verify:token-expiry",
+    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore && npm run verify:security-hardening && npm run verify:token-expiry && npm run verify:public-discovery",
     "verify:security-hardening": "node scripts/verify-security-hardening.mjs",
     "audit:production": "npm audit --omit=dev --audit-level=high",
-    "verify:token-expiry": "node scripts/verify-token-expiry.mjs"
+    "verify:token-expiry": "node scripts/verify-token-expiry.mjs",
+    "public:publish": "tsx src/set-public-entity.ts --publish",
+    "public:unpublish": "tsx src/set-public-entity.ts --unpublish",
+    "verify:public-discovery": "node scripts/verify-public-discovery.mjs",
+    "test:public-discovery": "node scripts/test-public-discovery.mjs"
   },
   "keywords": [],
   "author": "",
