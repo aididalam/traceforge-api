@@ -114,6 +114,64 @@ const output =
     "--output",
   );
 
+const expiresInHoursValue =
+  argument(
+    "--expires-in-hours",
+  );
+
+const noExpiry =
+  process.argv.includes(
+    "--no-expiry",
+  );
+
+if (
+  (
+    expiresInHoursValue !==
+    undefined
+  ) ===
+  noExpiry
+) {
+  throw new Error(
+    "Exactly one of --expires-in-hours or --no-expiry is required",
+  );
+}
+
+let expiresAt:
+  | Date
+  | null =
+  null;
+
+if (
+  expiresInHoursValue !==
+  undefined
+) {
+  const expiresInHours =
+    Number(
+      expiresInHoursValue,
+    );
+
+  if (
+    !Number.isSafeInteger(
+      expiresInHours,
+    ) ||
+    expiresInHours < 1 ||
+    expiresInHours > 8760
+  ) {
+    throw new Error(
+      "--expires-in-hours must be an integer between 1 and 8760",
+    );
+  }
+
+  expiresAt =
+    new Date(
+      Date.now() +
+      expiresInHours *
+        60 *
+        60 *
+        1000,
+    );
+}
+
 const requestedScopes =
   argumentsFor(
     "--scope",
@@ -279,9 +337,10 @@ await db.query(
       tenant_id,
       organization_id,
       token_name,
-      scopes
+      scopes,
+      expires_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `,
   [
     tokenId,
@@ -295,6 +354,7 @@ await db.query(
     JSON.stringify(
       scopes,
     ),
+    expiresAt,
   ],
 );
 
@@ -353,6 +413,14 @@ console.log(
 
 console.log(
   `Name: ${tokenName}`,
+);
+
+console.log(
+  `Expiry: ${
+    expiresAt
+      ? expiresAt.toISOString()
+      : "none (explicit)"
+  }`,
 );
 
 console.log(
