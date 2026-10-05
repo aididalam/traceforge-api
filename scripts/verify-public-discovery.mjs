@@ -47,7 +47,8 @@ assert.match(moduleText, /target_publication/);
 assert.match(moduleText, /CAST\(ce\.id AS CHAR\)/);
 assert.match(moduleText, /ce\.id > CAST\(\? AS UNSIGNED\)/);
 assert.doesNotMatch(moduleText, /OFFSET\s/i);
-const { registerPublicDiscoveryRoutes } = await loadSource(moduleText);
+const presentationUrl = "data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync("src/public-presentation.ts", "utf8"))).toString("base64");
+const { registerPublicDiscoveryRoutes } = await loadSource(moduleText.replace('"../public-presentation.js"', JSON.stringify(presentationUrl)));
 
 const tenantId = "0x" + "ab".repeat(32);
 const entityId = "0x" + "cd".repeat(32);
@@ -76,6 +77,7 @@ const db = {
   async query(sql, values) {
     queryCount += 1;
     assert.doesNotMatch(sql, /offchain_documents|document_json|SELECT\s+\*/i);
+    if (sql.includes("FROM public_entity_presentations")) return [[]];
     if (sql.includes("FROM public_entity_publications p")) {
       assert.match(sql, /JOIN entities e ON e\.tenant_id = p\.tenant_id AND e\.entity_id = p\.entity_id/);
       assert.match(sql, /WHERE p\.tenant_id = \? AND p\.entity_id = \?/);
@@ -89,8 +91,8 @@ const db = {
     return [published ? events.filter(e => BigInt(e.id) > after).slice(0, values.at(-1)) : []];
   },
 };
-const entityKeys = ["tenantId", "entityId", "entityType", "entityTypeLabel", "metadataHash", "currentState", "currentStateLabel", "currentCustodian", "closed", "createdAt", "closedAt"].sort();
-const eventKeys = ["eventId", "eventName", "blockNumber", "transactionHash", "transactionIndex", "logIndex", "eventType", "eventTypeLabel", "stateAfter", "stateAfterLabel", "linkType", "linkTypeLabel", "metadataHash", "evidenceHash"].sort();
+const entityKeys = ["tenantId", "entityId", "entityType", "entityTypeLabel", "metadataHash", "currentState", "currentStateLabel", "currentCustodian", "closed", "createdAt", "closedAt", "productInfo", "currentHolder"].sort();
+const eventKeys = ["eventId", "eventName", "blockNumber", "transactionHash", "transactionIndex", "logIndex", "eventType", "eventTypeLabel", "stateAfter", "stateAfterLabel", "linkType", "linkTypeLabel", "metadataHash", "evidenceHash", "occurredAt", "organization", "transfer"].sort();
 const path = `/public/v1/tenants/${tenantId}/entities/${entityId}`;
 const app = Fastify({ logger: false });
 app.setErrorHandler(perimeter.handler);

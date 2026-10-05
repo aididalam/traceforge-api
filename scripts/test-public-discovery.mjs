@@ -23,8 +23,8 @@ const scope = [config.traceforge.chainId, config.traceforge.contractAddress];
 const ownPublications = [];
 const servers = [];
 const sentinel = "public-discovery-redaction-check-not-an-operator-token";
-const entityKeys = ["tenantId", "entityId", "entityType", "entityTypeLabel", "metadataHash", "currentState", "currentStateLabel", "currentCustodian", "closed", "createdAt", "closedAt"].sort();
-const eventKeys = ["eventId", "eventName", "blockNumber", "transactionHash", "transactionIndex", "logIndex", "eventType", "eventTypeLabel", "stateAfter", "stateAfterLabel", "linkType", "linkTypeLabel", "metadataHash", "evidenceHash"].sort();
+const entityKeys = ["tenantId", "entityId", "entityType", "entityTypeLabel", "metadataHash", "currentState", "currentStateLabel", "currentCustodian", "closed", "createdAt", "closedAt", "productInfo", "currentHolder"].sort();
+const eventKeys = ["eventId", "eventName", "blockNumber", "transactionHash", "transactionIndex", "logIndex", "eventType", "eventTypeLabel", "stateAfter", "stateAfterLabel", "linkType", "linkTypeLabel", "metadataHash", "evidenceHash", "occurredAt", "organization", "transfer"].sort();
 
 async function publicationSnapshot() {
   return query("SELECT tenant_id, entity_id, published_at FROM public_entity_publications ORDER BY tenant_id, entity_id");

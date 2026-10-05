@@ -778,7 +778,8 @@ Entity responses contain only:
 
 ```text
 tenantId, entityId, entityType, entityTypeLabel, metadataHash,
-currentState, currentStateLabel, currentCustodian, closed, createdAt, closedAt
+currentState, currentStateLabel, currentCustodian, closed, createdAt, closedAt,
+productInfo, currentHolder
 ```
 
 History returns the same safe entity projection plus:
@@ -791,7 +792,8 @@ History returns the same safe entity projection plus:
   events: [{
     eventId, eventName, blockNumber, transactionHash, transactionIndex,
     logIndex, eventType, eventTypeLabel, stateAfter, stateAfterLabel,
-    linkType, linkTypeLabel, metadataHash, evidenceHash
+    linkType, linkTypeLabel, metadataHash, evidenceHash,
+    occurredAt, organization, transfer
   }],
   page: { limit, hasMore, nextAfterEventId }
 }
@@ -807,6 +809,31 @@ relationship endpoint IDs are excluded. Relationship domain events are included
 only when both linked entities are explicitly published. Trace evidence for the
 requested entity remains available as hashes. Publication does not grant access
 to the authenticated `/v1/documents/:contentHash` endpoint.
+
+`occurredAt` is the event's actual recorded Unix timestamp (nullable decimal
+seconds), selected by event name. `organization` and transfer `from`/`to` expose
+business references with nullable display names/types; no actor wallet is exposed.
+`productInfo` contains separately reviewed name/description and label/value fields.
+`currentHolder` adds the current business's approved display name/type. Migration
+006 prepares a per-product display snapshot; it never resolves private documents
+during a public read. Unshared or stale display details return null.
+
+After separately authorized migration/service activation, share or clear a
+reviewed public display file with:
+
+```bash
+npm run public:details -- --tenant <tenantId> --entity <entityId> --file <public-file.json> --confirm-public
+npm run public:details -- --tenant <tenantId> --entity <entityId> --clear
+```
+
+Sharing requires an explicitly published indexed product and current metadata
+references for the product and each in-workspace business. It runs atomically
+and does not publish original documents, alter the tracking registry or broadcast.
+If metadata references change, stale display details are hidden until reviewed.
+The display excerpt is associated with the source reference; it is not itself
+independently authenticated by the full document's hash. See the parent project's
+[public display contract](https://github.com/aididalam/traceforge/blob/main/docs/public-product-details.md)
+for the file shape and activation boundary.
 
 Publication is managed locally by an operator:
 
@@ -832,6 +859,8 @@ Verification requires Node 22.13 or newer:
 npm run verify:public-discovery
 npm run verify:production-build
 npm run test:public-discovery
+npm run verify:public-presentation
+npm run test:public-presentation
 ```
 
 The verifier uses offline fixtures to test the real route and perimeter code,

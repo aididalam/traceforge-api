@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool, RowDataPacket } from "mysql2/promise";
+import { readPublicPresentation, publicOrganization, publicTimestamp } from "../public-presentation.js";
+import type { Presentation } from "../public-presentation.js";
 
 interface Dependencies {
   db: Pick<Pool, "query">;
@@ -46,14 +48,30 @@ interface EventRow extends RowDataPacket {
   link_type_label: string | null;
   metadata_hash: string | null;
   evidence_hash: string | null;
+  occurred_at: string | null;
+  organization_id: string | null;
+  from_organization_id: string | null;
+  to_organization_id: string | null;
 }
 
 const bytes32 = { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" } as const;
 const nullableString = { anyOf: [{ type: "string" }, { type: "null" }] } as const;
+const organizationSchema = {
+  anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
+    required: ["id", "name", "type"], properties: { id: bytes32, name: nullableString, type: nullableString } }],
+} as const;
+const productInfoSchema = {
+  anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
+    required: ["name", "description", "fields"], properties: {
+      name: nullableString, description: nullableString,
+      fields: { type: "array", maxItems: 32, items: { type: "object", additionalProperties: false,
+        required: ["label", "value"], properties: { label: { type: "string", maxLength: 80 }, value: { type: "string", maxLength: 1000 } } } },
+    } }],
+} as const;
 const entitySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["tenantId", "entityId", "entityType", "entityTypeLabel", "metadataHash", "currentState", "currentStateLabel", "currentCustodian", "closed", "createdAt", "closedAt"],
+  required: ["tenantId", "entityId", "entityType", "entityTypeLabel", "metadataHash", "currentState", "currentStateLabel", "currentCustodian", "closed", "createdAt", "closedAt", "productInfo", "currentHolder"],
   properties: {
     tenantId: bytes32,
     entityId: bytes32,
@@ -66,13 +84,15 @@ const entitySchema = {
     closed: { type: "boolean" },
     createdAt: { type: "string" },
     closedAt: nullableString,
+    productInfo: productInfoSchema,
+    currentHolder: organizationSchema,
   },
 } as const;
 
 const eventSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["eventId", "eventName", "blockNumber", "transactionHash", "transactionIndex", "logIndex", "eventType", "eventTypeLabel", "stateAfter", "stateAfterLabel", "linkType", "linkTypeLabel", "metadataHash", "evidenceHash"],
+  required: ["eventId", "eventName", "blockNumber", "transactionHash", "transactionIndex", "logIndex", "eventType", "eventTypeLabel", "stateAfter", "stateAfterLabel", "linkType", "linkTypeLabel", "metadataHash", "evidenceHash", "occurredAt", "organization", "transfer"],
   properties: {
     eventId: { type: "string" },
     eventName: { type: "string" },
@@ -88,6 +108,10 @@ const eventSchema = {
     linkTypeLabel: nullableString,
     metadataHash: nullableString,
     evidenceHash: nullableString,
+    occurredAt: nullableString,
+    organization: organizationSchema,
+    transfer: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
+      required: ["from", "to"], properties: { from: organizationSchema, to: organizationSchema } }] },
   },
 } as const;
 
@@ -116,7 +140,7 @@ function apiError(code: string, message: string) {
   return { error: { code, message } };
 }
 
-function entityResponse(row: EntityRow) {
+function entityResponse(row: EntityRow, presentation: Presentation) {
   return {
     tenantId: row.tenant_id,
     entityId: row.entity_id,
@@ -129,6 +153,8 @@ function entityResponse(row: EntityRow) {
     closed: Boolean(row.closed),
     createdAt: String(row.created_at),
     closedAt: row.closed_at === null ? null : String(row.closed_at),
+    productInfo: presentation.productInfo,
+    currentHolder: publicOrganization(row.current_custodian, presentation),
   };
 }
 
@@ -182,7 +208,7 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
     schema: {
       ...commonSchema,
       summary: "Read an explicitly published entity",
-      description: "Public, read-only provenance. Metadata documents are not included. Missing and unpublished entities both return 404.",
+      description: "Public product status with separately approved display details and business names. Private metadata documents are not included. Missing and unpublished products both return 404.",
       response: { 200: entitySchema, ...errors },
     },
   }, async (request, reply) => {
@@ -192,14 +218,15 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
       reply.code(404);
       return apiError("entity_not_found", "Entity was not found.");
     }
-    return entityResponse(entity);
+    const presentation = await readPublicPresentation(db, entity.tenant_id, entity.entity_id, entity.metadata_hash);
+    return entityResponse(entity, presentation);
   });
 
   app.get<{ Params: EntityParams; Querystring: HistoryQuery }>(route + "/history", {
     schema: {
       ...commonSchema,
       summary: "Read published entity history",
-      description: "Public, read-only, ascending event-ID pagination. Documents and raw arguments are excluded. Relationship events are visible only when both endpoints are published; endpoint IDs are omitted.",
+      description: "Dated public supply history with separately approved business names, in ascending event-ID order. Private documents, wallets and raw arguments are excluded. Relationship events require both endpoints to be published; endpoint IDs are omitted.",
       querystring: {
         type: "object",
         additionalProperties: false,
@@ -257,7 +284,29 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
               lt.display_label AS link_type_label,
               COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.metadataHashAfter')),
                        JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.metadataHash'))) AS metadata_hash,
-              JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.evidenceHash')) AS evidence_hash
+              JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.evidenceHash')) AS evidence_hash,
+              CASE ce.event_name
+                WHEN 'EntityCreated' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.createdAt'))
+                WHEN 'TraceRecorded' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.timestamp'))
+                WHEN 'CustodyTransferProposed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.proposedAt'))
+                WHEN 'CustodyTransferred' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.acceptedAt'))
+                WHEN 'CustodyTransferCancelled' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.cancelledAt'))
+                WHEN 'CustodyTransferCancelledByAdmin' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.cancelledAt'))
+                WHEN 'EntityLinkCreated' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.createdAt'))
+                WHEN 'EntityLinkStatusChanged' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.updatedAt'))
+                WHEN 'EntityClosed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.closedAt'))
+              END AS occurred_at,
+              CASE ce.event_name
+                WHEN 'CustodyTransferProposed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.fromOrganizationId'))
+                WHEN 'CustodyTransferCancelled' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.fromOrganizationId'))
+                WHEN 'CustodyTransferred' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId'))
+                WHEN 'CustodyTransferCancelledByAdmin' THEN NULL
+                ELSE JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.organizationId'))
+              END AS organization_id,
+              CASE WHEN ce.event_name IN ('CustodyTransferProposed','CustodyTransferred','CustodyTransferCancelled','CustodyTransferCancelledByAdmin')
+                THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.fromOrganizationId')) END AS from_organization_id,
+              CASE WHEN ce.event_name IN ('CustodyTransferProposed','CustodyTransferred','CustodyTransferCancelled','CustodyTransferCancelledByAdmin')
+                THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId')) END AS to_organization_id
        FROM chain_events ce
        JOIN public_entity_publications p ON p.tenant_id = ? AND p.entity_id = ?
          AND p.tenant_id = JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.tenantId'))
@@ -290,10 +339,11 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
     );
     const hasMore = rows.length > page.limit;
     const visible = rows.slice(0, page.limit);
+    const presentation = await readPublicPresentation(db, entity.tenant_id, entity.entity_id, entity.metadata_hash);
     return {
       tenantId: entity.tenant_id,
       entityId: entity.entity_id,
-      entity: entityResponse(entity),
+      entity: entityResponse(entity, presentation),
       events: visible.map(row => ({
         eventId: String(row.id),
         eventName: row.event_name,
@@ -309,6 +359,12 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
         linkTypeLabel: row.link_type_label,
         metadataHash: row.metadata_hash,
         evidenceHash: row.evidence_hash,
+        occurredAt: publicTimestamp(row.occurred_at),
+        organization: publicOrganization(row.organization_id, presentation),
+        transfer: row.from_organization_id || row.to_organization_id ? {
+          from: publicOrganization(row.from_organization_id, presentation),
+          to: publicOrganization(row.to_organization_id, presentation),
+        } : null,
       })),
       page: {
         limit: page.limit,
