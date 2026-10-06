@@ -1,5 +1,6 @@
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { publicTimestamp } from "./public-presentation.js";
+import { readProductFields } from "./product-metadata.js";
 export type OperatorReader = Pick<Pool, "query">;
 export interface OperatorPrincipal { accountId: string; email: string; name: string; tenantId: string; organizationId: string; workspaceName: string | null; organizationName: string | null; access: "manage" }
 export const text = (value: unknown, limit = 240): string | null => typeof value === "string" && value !== "null" && value.trim() ? value.trim().slice(0, limit) : null;
@@ -18,6 +19,7 @@ export async function products(db: OperatorReader, principal: OperatorPrincipal,
     et.display_label AS type_label, st.display_label AS status_label,
     JSON_UNQUOTE(JSON_EXTRACT(d.document_json,'$.name')) AS name,
     JSON_UNQUOTE(JSON_EXTRACT(d.document_json,'$.description')) AS description,
+    JSON_EXTRACT(d.document_json,'$.fields') AS custom_fields,
     JSON_UNQUOTE(JSON_EXTRACT(d.document_json,'$.units')) AS units,
     JSON_UNQUOTE(JSON_EXTRACT(d.document_json,'$.packagingStatus')) AS packaging,
     JSON_UNQUOTE(JSON_EXTRACT(d.document_json,'$.qualityStatus')) AS quality,
@@ -37,8 +39,8 @@ export async function products(db: OperatorReader, principal: OperatorPrincipal,
   return { products: visible.map(row=>({ id: row.entity_id, name: text(row.name), description: text(row.description,2000),
     type: text(row.type_label), status: text(row.status_label), closed: Boolean(row.closed), createdAt: String(row.created_at),
     holder: { id: row.current_custodian, name: text(row.holder_name) },
-    fields: [["Units",row.units],["Packaging",row.packaging],["Quality",row.quality],["Revision",row.revision]]
-      .filter(([,value])=>text(value)!==null).map(([label,value])=>({ label, value: text(value,1000)! })) })),
+    fields: readProductFields(row.custom_fields,[["Units",row.units],["Packaging",row.packaging],["Quality",row.quality],["Revision",row.revision]]
+      .filter(([,value])=>text(value)!==null).map(([label,value])=>({ label, value: text(value,1000)! }))) })),
     page: { hasMore: rows.length>limit, next: rows.length>limit ? String(visible.at(-1)!.created_cursor) : null } };
 }
 export async function productHistory(db: OperatorReader, principal: OperatorPrincipal, scope: [number,string], entityId: string, after: string, limit: number) {

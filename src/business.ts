@@ -13,6 +13,8 @@ import { BusinessProblem, businessWrite } from "./business-write.js";
 import { issuePublicShortLink, normalizeShortCode } from "./public-short-links.js";
 import { savePublicPresentation } from "./public-presentation.js";
 import type { OperatorPrincipal } from "./operator-data.js";
+import { normalizeProductFields, readProductFields } from "./product-metadata.js";
+import type { ProductField } from "./product-metadata.js";
 
 const id = () => "0x" + randomBytes(32).toString("hex");
 const hash = (value: string) => keccak256(stringToHex(value));
@@ -120,7 +122,7 @@ export async function syncPublicDetails(reference: RowDataPacket) {
   await db.query("INSERT IGNORE INTO public_entity_tracking_ids (tracking_id,tenant_id,entity_id) VALUES (UNHEX(SUBSTRING(?,3)),?,?)",
     [reference.tracking_id,reference.tenant_id,reference.entity_id]);
   await savePublicPresentation(db,reference.tenant_id,reference.entity_id,{ metadataHash:products[0].metadata_hash,
-    productInfo:{name:doc.name,description:doc.description??null,fields:[]},
+    productInfo:{name:doc.name,description:doc.description?.trim()||null,fields:readProductFields(doc.fields)},
     organizations:rows.map(row=>({id:row.organization_id,metadataHash:row.metadata_hash,name:row.business_name,type:row.business_type})) });
   await issuePublicShortLink(db,reference.tracking_id);
   await db.query("UPDATE business_product_records SET publication_initialized=TRUE WHERE tracking_id=?",[reference.tracking_id]);
@@ -143,12 +145,16 @@ export async function receiveLookup(principal: OperatorPrincipal, tracking: stri
     canReceive:!entity.closed && entity.currentCustodian.toLowerCase()!==principal.organizationId };
 }
 
-export interface CreateInput { name:string; description:string; publish:boolean; idempotencyKey:string }
+export interface CreateInput { name:string; description:string; fields?:ProductField[]; publish:boolean; idempotencyKey:string }
 export async function createBusinessProduct(principal: OperatorPrincipal, input: CreateInput) {
+  let fields: ProductField[];
+  try { fields = normalizeProductFields(input.fields); }
+  catch { throw new BusinessProblem("invalid_request", 400); }
   await semantics();
   const [wallets] = await db.query<RowDataPacket[]>("SELECT tenant_id,production_role_id FROM business_wallets WHERE organization_id=?", [principal.organizationId]);
   if (!wallets[0]) throw new BusinessProblem("business_not_ready", 503);
-  const tenantId = wallets[0].tenant_id, metadataHash = await document("entity",{name:input.name.trim(),description:input.description.trim()});
+  const tenantId = wallets[0].tenant_id, metadataHash = await document("entity",{
+    name:input.name.trim(),description:input.description.trim(),...(fields.length?{fields}:{}) });
   // A deterministic identity for this actor/request makes retries create the same product.
   const trackingId = hash(principal.organizationId + ":" + input.idempotencyKey), entityId = trackingId;
   await db.query(`INSERT IGNORE INTO business_product_records (tracking_id,tenant_id,entity_id,creator_organization_id,public_details)

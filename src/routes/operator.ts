@@ -5,6 +5,8 @@ import { AuthenticationBusy, credential, digest, emailPattern, hashPassword, inv
 import { businesses, operations, products, productHistory, text } from "../operator-data.js";
 import type { businessActions } from "../business.js";
 import type { OperatorPrincipal } from "../operator-data.js";
+import { normalizeProductFields } from "../product-metadata.js";
+import type { CreateInput } from "../business.js";
 declare module "fastify" { interface FastifyContextConfig { operatorPublic?: boolean } }
 
 const bytes32 = /^0x[0-9a-fA-F]{64}$/;
@@ -43,9 +45,13 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
       const paging=route.endsWith("/products")||route.endsWith("/history");
       if([...query.keys()].some(key=>!paging||!["after","limit"].includes(key))||query.getAll("after").length>1||query.getAll("limit").length>1)
         return reply.code(400).send(failure("invalid_request","Invalid request parameters."));
-      const allowed=route.endsWith("/signup")?["email","password","name","businessName","businessType","publicProfile"]:route.endsWith("/create")?["name","description","publish","idempotencyKey"]:route.endsWith("/receive")?["version","confirmed","idempotencyKey"]:route.endsWith("/close")?["reason","confirmed","idempotencyKey"]:route.endsWith("/login")?["email","password"]:route.endsWith("/activate")?["email","password","name","invitationCode"]:[];
+      const allowed=route.endsWith("/signup")?["email","password","name","businessName","businessType","publicProfile"]:route.endsWith("/create")?["name","description","fields","publish","idempotencyKey"]:route.endsWith("/receive")?["version","confirmed","idempotencyKey"]:route.endsWith("/close")?["reason","confirmed","idempotencyKey"]:route.endsWith("/login")?["email","password"]:route.endsWith("/activate")?["email","password","name","invitationCode"]:[];
       if(request.body&&typeof request.body==='object'&&Object.keys(request.body).some(key=>!allowed.includes(key)))
         return reply.code(400).send(failure("invalid_request","Check the information provided."));
+      if(route.endsWith("/create")&&request.body&&typeof request.body==='object'){
+        try{normalizeProductFields((request.body as Record<string,unknown>).fields);}
+        catch{return reply.code(400).send(failure("invalid_request","Check the additional product details."));}
+      }
     });
     operator.setErrorHandler((error,_request,reply)=>{
       const problem=error as {code?:string;status?:number;statusCode?:number;validation?:unknown};
@@ -140,10 +146,12 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
     const keySchema={type:"string",minLength:8,maxLength:64,pattern:"^[A-Za-z0-9_-]+$"};
     const confirmation={type:"boolean",const:true};
     const actionUnavailable=(reply:import("fastify").FastifyReply)=>reply.code(503).send(failure("writes_disabled","Product operations are temporarily unavailable."));
-    operator.post<{Body:{name:string;description:string;publish:boolean;idempotencyKey:string}}>("/products/create",{
-      bodyLimit:4096,schema:{tags:["operator-dashboard"],querystring:noQuery,body:{type:"object",additionalProperties:false,
+    operator.post<{Body:CreateInput}>("/products/create",{
+      bodyLimit:256*1024,schema:{tags:["operator-dashboard"],querystring:noQuery,body:{type:"object",additionalProperties:false,
         required:["name","description","publish","idempotencyKey"],properties:{name:{type:"string",minLength:1,maxLength:240},
-          description:{type:"string",maxLength:2000},publish:{type:"boolean"},idempotencyKey:keySchema}}}},async(request,reply)=>{
+          description:{type:"string",maxLength:2000},fields:{type:"array",maxItems:32,items:{type:"object",additionalProperties:false,
+            required:["label","value"],properties:{label:{type:"string",minLength:1,maxLength:80},value:{type:"string",minLength:1,maxLength:1000}}}},
+          publish:{type:"boolean"},idempotencyKey:keySchema}}}},async(request,reply)=>{
       if(!request.body.name.trim())return reply.code(400).send(failure("invalid_request","Enter a product name."));
       return deps.actions?deps.actions.create(context(request),request.body):actionUnavailable(reply);
     });

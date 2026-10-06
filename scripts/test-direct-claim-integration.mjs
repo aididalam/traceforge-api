@@ -7,7 +7,7 @@ import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import mysql from "mysql2/promise";
 import dotenv from "dotenv";
-import { createPublicClient, createWalletClient, defineChain, http, keccak256 } from "viem";
+import { createPublicClient, createWalletClient, defineChain, http, keccak256, stringToHex } from "viem";
 
 const root=resolve(".."),rpc="http://127.0.0.1:18545",api="http://127.0.0.1:13301";
 const local={...process.env,...dotenv.parse(await readFile(".env","utf8").catch(error=>{if(error.code!=="ENOENT")throw error;return "";}))};
@@ -64,12 +64,33 @@ try {
   return {status:response.status,body:await response.json()};
  };
  checks.push("Four independent businesses signed up, registered on chain and signed in without invitations.");
- const create=async(actor,name,publish)=>{const result=await request("/products/create",{name,description:"TraceForge integration product data",publish,idempotencyKey:randomUUID()},actor.token);assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.status,"CONFIRMED");sync();return result.body.trackingId;};
- const first=await create(producer,"Integration Bottle",true),second=await create(other,"Other Producer Bottle",true),privateId=await create(other,"PRIVATE_PRODUCT_SENTINEL",false);
+ const fields=[{label:"Batch number",value:"BATCH-2026-001"},{label:"Ingredients",value:"Water, Sugar\nNatural Flavour · 500mL"},{label:"Origin",value:"বাংলাদেশ"},
+  ...Array.from({length:5},(_,i)=>({label:"Quality note "+(i+1),value:"Bounded JSON field "+"x".repeat(900)}))];
+ const creates=new Map();
+ const create=async(actor,name,publish,details,description="TraceForge integration product data")=>{
+  const body={name,description,...(details?{fields:details}:{}),publish,idempotencyKey:randomUUID()};
+  const result=await request("/products/create",body,actor.token);assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.status,"CONFIRMED");
+  creates.set(result.body.trackingId,{body,result:result.body});sync();return result.body.trackingId;
+ };
+ const first=await create(producer,"Integration Bottle",true,fields),second=await create(other,"Other Producer Bottle",true,undefined,""),privateId=await create(other,"PRIVATE_PRODUCT_SENTINEL",false,[{label:"Private supplier note",value:"PRIVATE_FIELD_SENTINEL"}]);
+ const invalidCreate={name:"Invalid details",description:"",publish:false,idempotencyKey:randomUUID()};
+ const [documentsBefore]=await conn.query("SELECT COUNT(*) AS total FROM offchain_documents");
+ for(const invalid of [[{label:"Batch",value:"1"},{label:" batch ",value:"2"}],[{label:" ",value:"1"}],[{label:"Batch",value:1}],[{label:"Batch",value:"1",hidden:true}],Array.from({length:33},(_,i)=>({label:"Field "+i,value:"1"}))])
+  assert.equal((await request("/products/create",{...invalidCreate,fields:invalid},producer.token)).status,400);
+ const [documentsAfter]=await conn.query("SELECT COUNT(*) AS total FROM offchain_documents");assert.equal(Number(documentsAfter[0].total),Number(documentsBefore[0].total));
  assert.equal((await request("/products",undefined,distributor.token)).body.products.length,0);
  const read=(functionName,args)=>client.readContract({address,abi:artifact.abi,functionName,args});
  assert.equal(await read("isActiveTenantMember",[producer.user.tenantId,distributor.user.organizationId]),false);
  const before=await read("getEntity",[producer.user.tenantId,first]);
+ const [metadataRows]=await conn.query("SELECT raw_text,document_json FROM offchain_documents WHERE content_hash=?",[before.metadataHash]);
+ const saved=typeof metadataRows[0].document_json==="string"?JSON.parse(metadataRows[0].document_json):metadataRows[0].document_json;
+ assert.deepEqual(saved.fields,fields);assert.equal(keccak256(stringToHex(metadataRows[0].raw_text)),before.metadataHash);
+ const original=creates.get(first),createRetry=await request("/products/create",original.body,producer.token);
+ assert.equal(createRetry.status,200);assert.equal(createRetry.body.transactionHash,original.result.transactionHash);
+ assert.equal((await request("/products/create",{...original.body,fields:[{...fields[0],value:"Different batch"},...fields.slice(1)]},producer.token)).status,409);
+ assert.equal((await read("getEntity",[producer.user.tenantId,first])).metadataHash,before.metadataHash);
+ const producerHistory=await request("/products/"+first+"/history",undefined,producer.token);assert.deepEqual(producerHistory.body.product.fields,fields);
+ checks.push("Dynamic field labels/values round-trip through stored JSON, operator details and the on-chain metadata hash; invalid or duplicate fields are rejected before storage.");
  const producerWriteToken=await genericToken(producer,producer.user.tenantId),evidenceHash=before.metadataHash,eventType=before.currentState;
  const traceSimulation=await generic(producer.user.tenantId,first,"traces/simulate",{eventType,evidenceHash},producerWriteToken);
  assert.equal(traceSimulation.status,200,JSON.stringify(traceSimulation.body));assert.equal(traceSimulation.body.simulated,true);assert.ok(!("transactionHash" in traceSimulation.body));
@@ -120,6 +141,11 @@ try {
  const publicRef=await fetch(api+"/public/v1/tracking/"+first);assert.equal(publicRef.status,200);const ref=await publicRef.json();
  const publicHistory=await (await fetch(api+`/public/v1/tenants/${ref.tenantId}/entities/${ref.entityId}/history`)).json();
  assert.equal(publicHistory.entity.productInfo.name,"Integration Bottle");assert.equal(publicHistory.entity.currentHolder.name,"Test Distributor");assert.ok(publicHistory.events.some(e=>e.eventName==="CustodyClaimed"&&e.occurredAt));
+ assert.deepEqual(publicHistory.entity.productInfo.fields,fields);
+ const secondRef=await (await fetch(api+"/public/v1/tracking/"+second)).json();
+ const secondDetail=await (await fetch(api+`/public/v1/tenants/${secondRef.tenantId}/entities/${secondRef.entityId}`)).json();assert.equal(secondDetail.productInfo.description,null);
+ assert.ok(!JSON.stringify(publicHistory).includes("PRIVATE_FIELD_SENTINEL"));
+ assert.ok(!JSON.stringify(privateLookup).includes("PRIVATE_FIELD_SENTINEL"));
  const [aliases]=await conn.query("SELECT short_code FROM public_entity_short_links WHERE tracking_id=UNHEX(SUBSTRING(?,3))",[first]);
  assert.equal((await request("/receive/"+aliases[0].short_code,undefined,shop.token)).body.trackingId,first);
  assert.equal((await fetch(api+"/public/v1/tracking/"+privateId)).status,404);

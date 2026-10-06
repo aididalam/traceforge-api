@@ -35,6 +35,15 @@ All writes require an idempotency key in the validated body. The signed transact
 
 Generic `/v1/*` token-scoped read/production APIs remain available. `CUSTODY_CLAIM` and `ENTITY_CLOSE` preflight use global business identity. There are no proposal, acceptance, cancellation or pending-custody endpoints.
 
+Product creation accepts an optional `fields` array of `{ label, value }` text
+pairs (maximum 32, unique names up to 80 characters, values up to 1,000).
+Custom fields are stored inside the product metadata JSON and included in its
+on-chain hash. Operator details resolve the fields from the hash-bound document;
+public display copies them only for an explicitly shared product. A missing or
+empty array keeps compatibility with existing name/description-only products.
+Legacy Units/Packaging/Quality/Revision fields remain readable. Dynamic values
+are displayed as plain text, preserving their capitalization and contents.
+
 ## Public tracking
 
 `/public/v1/tracking/:trackingId`, `/public/v1/short-links/:shortCode`, and `/public/v1/tenants/:tenantId/entities/:entityId[/history]` expose only explicitly shared products. Full IDs and short codes keep their binding when a product is unpublished. `npm run public:sync` updates opted-in display snapshots after indexing and respects explicit unpublishing.
