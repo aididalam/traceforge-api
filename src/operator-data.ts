@@ -1,6 +1,7 @@
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { publicTimestamp } from "./public-presentation.js";
 import { readProductFields } from "./product-metadata.js";
+import { businessHistoryPredicate } from "./product-history.js";
 export type OperatorReader = Pick<Pool, "query">;
 export interface OperatorPrincipal { accountId: string; email: string; name: string; tenantId: string; organizationId: string; workspaceName: string | null; organizationName: string | null; access: "manage" }
 export const text = (value: unknown, limit = 240): string | null => typeof value === "string" && value !== "null" && value.trim() ? value.trim().slice(0, limit) : null;
@@ -64,6 +65,7 @@ export async function productHistory(db: OperatorReader, principal: OperatorPrin
       AND r.tracking_id=? AND (JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.entityId'))=r.entity_id
         OR JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.sourceEntityId'))=r.entity_id
         OR JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.targetEntityId'))=r.entity_id)
+      AND ${businessHistoryPredicate}
     ORDER BY ce.id LIMIT ?`, [...scope,after,entityId,limit+1]);
   const visible=rows.slice(0,limit);
   return { events: visible.map(row=>({ id: String(row.id), name: row.event_name, label: text(row.label),

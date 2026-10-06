@@ -8,8 +8,9 @@ const url = source => "data:text/javascript;base64," + Buffer.from(stripTypeScri
 const source = readFileSync("src/public-presentation.ts", "utf8");
 const moduleUrl = url(source);
 const { validatePresentation, readPublicPresentation, publicTimestamp, savePublicPresentation } = await import(moduleUrl);
+const historyUrl = url(readFileSync("src/product-history.ts", "utf8"));
 const routeSource = readFileSync("src/routes/public-discovery.ts", "utf8");
-const { registerPublicDiscoveryRoutes } = await import(url(routeSource.replace('"../public-presentation.js"', JSON.stringify(moduleUrl))));
+const { registerPublicDiscoveryRoutes } = await import(url(routeSource.replace('"../public-presentation.js"', JSON.stringify(moduleUrl)).replace('"../product-history.js"', JSON.stringify(historyUrl))));
 const h = byte => "0x" + byte.repeat(32);
 const tenant = h("ab"), entity = h("cd"), hash = h("44"), otherHash = h("55");
 const producer = { id: h("11"), metadataHash: h("66"), name: "Demo Producer", type: "Producer" };
@@ -59,7 +60,8 @@ await savePublicPresentation(writer,tenant,entity,null); assert.equal(saved,null
 let published = true, staleProduct = false, staleOrganization = false, missingTable = false, brokenProfile = false;
 let presentationQueries = 0;
 const db = { async query(sql, values) {
-  assert.doesNotMatch(sql, /SELECT\s+\*|offchain_documents|document_json|actor|wallet/i);
+  assert.doesNotMatch(sql, /SELECT\s+\*|offchain_documents|document_json|wallet/i);
+  assert.doesNotMatch(sql.split("FROM chain_events ce")[0], /actor/i, "Private actor addresses must never be selected for a public response");
   if (sql.includes("FROM public_entity_publications p")) return [[...(published && values.at(-2) === tenant && values.at(-1) === entity ? [{
     tenant_id: tenant, entity_id: entity, entity_type: hash, entity_type_label: "Batch", metadata_hash: staleProduct ? otherHash : hash,
     current_state: hash, current_state_label: "Packed", current_custodian: distributor.id, closed: 0, created_at: "1790000000", closed_at: null,

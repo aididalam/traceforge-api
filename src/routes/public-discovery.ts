@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { readPublicPresentation, publicOrganization, publicTimestamp } from "../public-presentation.js";
 import type { Presentation } from "../public-presentation.js";
+import { businessHistoryPredicate } from "../product-history.js";
 
 interface Dependencies {
   db: Pick<Pool, "query">;
@@ -327,6 +328,7 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
              )
            )
          )
+         AND ${businessHistoryPredicate}
        ORDER BY ce.id
        LIMIT ?`,
       [entity.tenant_id, entity.entity_id, ...scope, page.afterEventId.toString(), page.limit + 1],

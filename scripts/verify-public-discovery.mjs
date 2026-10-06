@@ -48,7 +48,8 @@ assert.match(moduleText, /CAST\(ce\.id AS CHAR\)/);
 assert.match(moduleText, /ce\.id > CAST\(\? AS UNSIGNED\)/);
 assert.doesNotMatch(moduleText, /OFFSET\s/i);
 const presentationUrl = "data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync("src/public-presentation.ts", "utf8"))).toString("base64");
-const { registerPublicDiscoveryRoutes } = await loadSource(moduleText.replace('"../public-presentation.js"', JSON.stringify(presentationUrl)));
+const historyUrl = "data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync("src/product-history.ts", "utf8"))).toString("base64");
+const { registerPublicDiscoveryRoutes } = await loadSource(moduleText.replace('"../public-presentation.js"', JSON.stringify(presentationUrl)).replace('"../product-history.js"', JSON.stringify(historyUrl)));
 
 const tenantId = "0x" + "ab".repeat(32);
 const entityId = "0x" + "cd".repeat(32);

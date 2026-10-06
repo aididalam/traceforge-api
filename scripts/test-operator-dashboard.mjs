@@ -17,13 +17,18 @@ try{
  }
  for(const sql of readFileSync("migrations/008_operator_accounts.sql","utf8").split(";").map(value=>value.trim()).filter(Boolean))await conn.query(sql.replace("CREATE TABLE IF NOT EXISTS","CREATE TEMPORARY TABLE"));
  // MySQL cannot reopen a connection-local TEMPORARY table under two aliases.
- // These empty mirrors represent the same empty document/semantic fixture;
+ // Document/semantic mirrors start empty; the event mirror copies raw fixtures.
  // only physical test table names change, never predicates, joins or values.
- for(const [original,mirror] of [["offchain_documents","operator_test_tenant_documents"],["offchain_documents","operator_test_holder_documents"],["semantic_registry","operator_test_state_semantics"]]){
+ for(const [original,mirror] of [["offchain_documents","operator_test_tenant_documents"],["offchain_documents","operator_test_holder_documents"],["semantic_registry","operator_test_state_semantics"],["chain_events","operator_test_companion_events"]]){
   const [rows]=await db.query("SHOW CREATE TABLE `"+original+"`");
   await conn.query(rows[0]["Create Table"].replace("CREATE TABLE `"+original+"`","CREATE TEMPORARY TABLE `"+mirror+"`"));
  }
- const query=async(sql,args=[])=>conn.query(sql.replace("LEFT JOIN offchain_documents td","LEFT JOIN operator_test_tenant_documents td").replace("LEFT JOIN offchain_documents od","LEFT JOIN operator_test_holder_documents od").replace("LEFT JOIN semantic_registry st","LEFT JOIN operator_test_state_semantics st"),args).catch(error=>{console.error("Temporary fixture query failed:",error.code);throw error;});
+ const query=async(sql,args=[])=>{
+  if(sql.includes("FROM chain_events companion")){
+   await conn.query("DELETE FROM operator_test_companion_events");
+   await conn.query("INSERT INTO operator_test_companion_events SELECT * FROM chain_events");
+  }
+  return conn.query(sql.replace("LEFT JOIN offchain_documents td","LEFT JOIN operator_test_tenant_documents td").replace("LEFT JOIN offchain_documents od","LEFT JOIN operator_test_holder_documents od").replace("LEFT JOIN semantic_registry st","LEFT JOIN operator_test_state_semantics st").replace("FROM chain_events companion","FROM operator_test_companion_events companion"),args).catch(error=>{console.error("Temporary fixture query failed:",error.code);throw error;});};
  const q=async(sql,args=[])=>conn.query(sql,args);
  const h=byte=>"0x"+byte.repeat(32),tenant=h("ab"),other=h("12"),org=h("cd"),org2=h("ef"),product=h("34"),meta=h("56");
  const password="Synthetic-Only-Password-2026",invitation=credential("tfoi");
@@ -45,9 +50,25 @@ try{
  let list=await app.inject({url:prefix+"/products",headers});assert.equal(list.statusCode,200);assert.equal(list.json().products.length,1);assert.equal(list.json().products[0].id,product);
  assert.equal((await app.inject({url:prefix+"/products?tenantId="+other,headers})).statusCode,400);
  assert.equal((await app.inject({url:prefix+"/products?after=9007199254740993",headers})).json().products.length,0);
- const transfer={tenantId:tenant,entityId:product,fromOrganizationId:org,toOrganizationId:org2,timestamp:"1791110400"};
+ const transfer={tenantId:tenant,entityId:product,fromOrganizationId:org,toOrganizationId:org2,timestamp:"1791110400",actor:"0x"+"99".repeat(20),eventType:meta,evidenceHash:meta};
  await q("INSERT INTO chain_events (id,chain_id,contract_address,block_number,block_hash,transaction_hash,transaction_index,log_index,topics,data,event_name,event_args) VALUES (9007199254741001,9009,?,1,?,?,0,0,JSON_ARRAY(),'0x','CustodyClaimed',?)",["0x"+"55".repeat(20),meta,h("78"),JSON.stringify(transfer)]);
  const history=await app.inject({url:prefix+"/products/"+product+"/history",headers});assert.equal(history.statusCode,200);assert.equal(history.json().events[0].id,"9007199254741001");assert.equal(history.json().events[0].occurredAt,"1791110400");assert.equal(history.json().events[0].organizationId,org2);
+ const trace={...transfer,organizationId:org2};
+ const removal={...trace,organizationId:org,closedAt:"1791110460"};
+ for(const [id,tx,log,name,args] of [
+  ["9007199254741002",h("78"),1,"TraceRecorded",trace],
+  ["9007199254741003",h("78"),2,"TraceRecorded",trace],
+  ["9007199254741004",h("79"),0,"EntityClosed",removal],
+  ["9007199254741005",h("79"),1,"TraceRecorded",{...removal,timestamp:removal.closedAt}],
+ ])await q("INSERT INTO chain_events (id,chain_id,contract_address,block_number,block_hash,transaction_hash,transaction_index,log_index,topics,data,event_name,event_args) VALUES (?,9009,?,1,?,?,0,?,JSON_ARRAY(),'0x',?,?)",[id,"0x"+"55".repeat(20),meta,tx,log,name,JSON.stringify(args)]);
+ const logical=(await app.inject({url:prefix+"/products/"+product+"/history",headers})).json();
+ assert.deepEqual(logical.events.map(event=>event.id),["9007199254741001","9007199254741003","9007199254741004"],"One action per paired receipt/removal, independent trace in same transaction preserved");
+ const first=(await app.inject({url:prefix+"/products/"+product+"/history?limit=1",headers})).json();
+ assert.equal(first.page.next,"9007199254741001");
+ const next=(await app.inject({url:prefix+"/products/"+product+"/history?limit=1&after="+first.page.next,headers})).json();
+ assert.equal(next.events[0].id,"9007199254741003","Companion must be suppressed even when its action is on the previous page");
+ const last=(await app.inject({url:prefix+"/products/"+product+"/history?limit=1&after="+next.page.next,headers})).json();
+ assert.equal(last.events[0].id,"9007199254741004");assert.deepEqual(last.page,{hasMore:false,next:null});
  const hiddenProduct=h("9a");await q("INSERT INTO entities (tenant_id,entity_id,entity_type,metadata_hash,current_state,current_custodian,created_at,created_event_id,updated_event_id) VALUES (?,?,?,?,?,?,1,2,2)",[other,hiddenProduct,meta,meta,meta,org]);
  assert.equal((await app.inject({url:prefix+"/products/"+hiddenProduct+"/history",headers})).statusCode,404);
  for(const [id,t,o]of [["12345678-1234-4234-8234-123456789abc",tenant,org],["12345678-1234-4234-8234-123456789def",tenant,org2],["12345678-1234-4234-8234-123456789aaa",other,org]])await q(`INSERT INTO chain_write_operations (operation_id,idempotency_key,request_hash,token_id,tenant_id,organization_id,entity_id,operation_name,role_id,status,transaction_hash,serialized_transaction,nonce,gas_estimate,gas_limit,request_json) VALUES (?,?,?,?,?,?,?,'recordTrace',?,'PREPARED',?,'SYNTHETIC_PRIVATE_SENTINEL',1,1,1,JSON_OBJECT('private','SYNTHETIC_PRIVATE_SENTINEL'))`,[id,id,meta,id,t,o,product,meta,"0x"+id.replaceAll("-","").padEnd(64,"0")]);
@@ -59,5 +80,5 @@ try{
  const again=await post("/login",{email:activation.email,password});const lastHeaders={authorization:"Bearer "+again.json().sessionToken};
  await q("UPDATE operator_sessions SET expires_at=DATE_SUB(CURRENT_TIMESTAMP,INTERVAL 1 MINUTE)");assert.equal((await app.inject({url:prefix+"/me",headers:lastHeaders})).statusCode,401);
  assert.deepEqual(await liveState(),before);
- console.log("Operator MySQL temporary-table checks passed: single-use bound activation, hashed passwords/sessions, exact cursors, tenant/product and organization-operation isolation, recorded transfer dates, live membership/account gates, logout/expiry. Live schema/data/migration ledger unchanged.");
+ console.log("Operator MySQL temporary-table checks passed: single-use bound activation, hashed passwords/sessions, exact cursors, tenant/product and organization-operation isolation, recorded transfer dates, one receive/removal per action with independent traces and exact cursor boundaries, live membership/account gates, logout/expiry. Live schema/data/migration ledger unchanged.");
 }finally{try{await app?.close();}finally{conn?.destroy();try{assert.deepEqual(await liveState(),before);}finally{await db.end();}}}

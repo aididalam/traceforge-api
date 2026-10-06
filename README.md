@@ -50,6 +50,14 @@ empty array keeps compatibility with existing name/description-only products.
 Legacy Units/Packaging/Quality/Revision fields remain readable. Dynamic values
 are displayed as plain text, preserving their capitalization and contents.
 
+Operator and public product histories show one business action per receive or
+removal. The contract emits a matching TraceRecorded log immediately after the
+action event. A shared SQL predicate excludes only that exact companion before
+LIMIT/cursor pagination, matching chain, contract, transaction, adjacent log,
+product, workspace, event type, evidence, actor, business and time. Separate
+updates in the same transaction stay visible. All indexed raw logs and generic
+technical discovery responses remain unchanged.
+
 ## Public tracking
 
 `/public/v1/tracking/:trackingId`, `/public/v1/short-links/:shortCode`, and `/public/v1/tenants/:tenantId/entities/:entityId[/history]` expose only explicitly shared products. Full IDs and short codes keep their binding when a product is unpublished. `npm run public:sync` updates opted-in display snapshots after indexing and respects explicit unpublishing.

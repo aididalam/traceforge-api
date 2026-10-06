@@ -30,6 +30,10 @@ try {
     const [schema] = await query(`SHOW CREATE TABLE ${table}`);
     await query(schema["Create Table"].replace(/^CREATE TABLE/, "CREATE TEMPORARY TABLE"));
   }
+  // The production query uses a correlated raw-log lookup. MySQL TEMPORARY
+  // tables need a second physical mirror for that alias in this isolated test.
+  const [eventSchema] = await query("SHOW CREATE TABLE chain_events");
+  await query(eventSchema["Create Table"].replace("`chain_events`","`presentation_test_companion_events`"));
   await query(readFileSync("migrations/006_public_entity_presentations.sql", "utf8").replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMPORARY TABLE"));
   await connection.beginTransaction();
   for (const id of [entity, linked]) {
@@ -68,7 +72,14 @@ try {
       VALUES (?,?,?,?,?,?,0,0,'[]','0x',?,?)`,
       [String(9007199254740993n+BigInt(i)),config.traceforge.chainId,config.traceforge.contractAddress,100+i,hash,h(String(i+1).padStart(2,"0")),kind,JSON.stringify(args)]);
   }
-  await registerPublicDiscoveryRoutes(app, { db: { query: connection.query.bind(connection) },
+  const historyQuery=async(sql,args=[])=>{
+    if(sql.includes("FROM chain_events companion")){
+      await query("DELETE FROM presentation_test_companion_events");
+      await query("INSERT INTO presentation_test_companion_events SELECT * FROM chain_events");
+    }
+    return connection.query(sql.replace("FROM chain_events companion","FROM presentation_test_companion_events companion"),args);
+  };
+  await registerPublicDiscoveryRoutes(app, { db: { query: historyQuery },
     chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress });
   const path=`/public/v1/tenants/${tenant}/entities/${entity}`;
   const response=await app.inject(path+"/history");
@@ -86,6 +97,40 @@ try {
   assert.equal(first.page.nextAfterEventId,"9007199254740995");
   const next=(await app.inject(path+"/history?limit=3&afterEventId="+first.page.nextAfterEventId)).json();
   assert.equal(next.events[0].eventName,"EntityLinkCreated");
+  const receipt={tenantId:tenant,entityId:entity,eventType:hash,evidenceHash:hash,actor:"0x"+"99".repeat(20),fromOrganizationId:producer.id,toOrganizationId:distributor.id,timestamp:"1790000500"};
+  const trace={...receipt,organizationId:distributor.id};
+  const removal={...trace,closedAt:"1790000560"};
+  const base=9007199254741100n;
+  const fixtures=[
+    ["CustodyClaimed",0,receipt], ["TraceRecorded",1,trace],
+    ["TraceRecorded",2,trace], // a separate trace in the very same transaction
+    ["EntityClosed",3,removal], ["TraceRecorded",4,{...removal,timestamp:removal.closedAt}],
+    ["EntityClosed",5,removal], ["TraceRecorded",6,{...removal,timestamp:removal.closedAt,evidenceHash:h("aa")}],
+    ["CustodyClaimed",7,receipt], ["TraceRecorded",8,{...trace,actor:"0x"+"88".repeat(20)}],
+    ["CustodyClaimed",9,receipt], ["TraceRecorded",10,{...trace,organizationId:producer.id}],
+    ["CustodyClaimed",11,receipt], ["TraceRecorded",12,{...trace,timestamp:"1790000501"}],
+    ["CustodyClaimed",13,receipt], ["TraceRecorded",14,{...trace,eventType:h("bb")}],
+    ["CustodyClaimed",15,{...receipt,entityId:linked}], ["TraceRecorded",16,trace],
+    ["CustodyClaimed",17,{...receipt,tenantId:h("bb")}], ["TraceRecorded",18,trace],
+    ["CustodyClaimed",19,receipt], ["TraceRecorded",21,trace], // nonadjacent
+  ];
+  for(let i=0;i<fixtures.length;i++){
+    const [kind,log,args]=fixtures[i];
+    await query("INSERT INTO chain_events (id,chain_id,contract_address,block_number,block_hash,transaction_hash,transaction_index,log_index,topics,data,event_name,event_args) VALUES (?,?,?,?,?,?,0,?,'[]','0x',?,?)",[String(base+BigInt(i)),config.traceforge.chainId,config.traceforge.contractAddress,200,hash,h("fe"),log,kind,JSON.stringify(args)]);
+  }
+  const expected=fixtures.flatMap(([, ,args],i)=>[1,4,15,17].includes(i)?[]:[String(base+BigInt(i))]);
+  const merged=(await app.inject(path+"/history?afterEventId="+(base-1n))).json();
+  assert.deepEqual(merged.events.map(event=>event.eventId),expected,"Only exact paired logs suppressed; distinct traces survive");
+  let cursor=String(base-1n),paged=[];
+  for(let count=0;count<expected.length;count++){
+    const response=await app.inject(path+"/history?limit=1&afterEventId="+cursor);
+    assert.equal(response.statusCode,200);const result=response.json();
+    assert.equal(result.events.length,1);paged.push(result.events[0].eventId);
+    if(!result.page.hasMore){assert.equal(result.page.nextAfterEventId,null);break;}
+    cursor=result.page.nextAfterEventId;
+  }
+  assert.deepEqual(paged,expected,"Filtering must occur before LIMIT, including paired logs crossing a cursor boundary");
+  assert.equal((await query("SELECT COUNT(*) AS count FROM chain_events"))[0].count,kinds.length+fixtures.length,"Raw audit logs preserved");
   await query("UPDATE entities SET metadata_hash=? WHERE tenant_id=? AND entity_id=?",[h("56"),tenant,entity]);
   assert.equal((await app.inject(path)).json().productInfo,null,"Stale product details exposed");
   await query("UPDATE organizations SET metadata_hash=? WHERE organization_id=?",[h("89"),distributor.id]);
@@ -101,7 +146,7 @@ try {
   await savePublicPresentation(connection,tenant,entity,null);
   assert.equal((await query("SELECT COUNT(*) AS count FROM public_entity_presentations"))[0].count,0);
   assert.deepEqual(await counts(),before,"Committed live data changed");
-  console.log("Public presentation MySQL checks passed: all nine event dates, correct transfer attribution, public product/name snapshots, stale and cross-workspace suppression, exact pagination and publication revocation.");
+  console.log("Public presentation MySQL checks passed: all event dates, paired-log suppression with independent traces preserved, exact cursor boundaries, correct transfer attribution, public product/name snapshots, stale and cross-workspace suppression, exact pagination and publication revocation.");
 } finally {
   try { await app.close(); await connection.rollback(); }
   finally {

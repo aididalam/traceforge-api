@@ -9,7 +9,8 @@ const credentialsText=readFileSync("src/operator-credentials.ts","utf8"),credent
 const {credential,digest,hashPassword}=await import(credentialsUrl);
 const presentationUrl=moduleUrl(readFileSync("src/public-presentation.ts","utf8"));
 const metadataUrl=moduleUrl(readFileSync("src/product-metadata.ts","utf8"));
-const dataText=readFileSync("src/operator-data.ts","utf8"),dataUrl=moduleUrl(dataText.replace('"./public-presentation.js"',JSON.stringify(presentationUrl)).replace('"./product-metadata.js"',JSON.stringify(metadataUrl)));
+const historyUrl=moduleUrl(readFileSync("src/product-history.ts","utf8"));
+const dataText=readFileSync("src/operator-data.ts","utf8"),dataUrl=moduleUrl(dataText.replace('"./public-presentation.js"',JSON.stringify(presentationUrl)).replace('"./product-metadata.js"',JSON.stringify(metadataUrl)).replace('"./product-history.js"',JSON.stringify(historyUrl)));
 const routeText=readFileSync("src/routes/operator.ts","utf8");
 const {registerOperatorRoutes}=await import(moduleUrl(routeText.replace('"../operator-credentials.js"',JSON.stringify(credentialsUrl)).replace('"../operator-data.js"',JSON.stringify(dataUrl)).replace('"../product-metadata.js"',JSON.stringify(metadataUrl))));
 const serverText=readFileSync("src/server.ts","utf8");
