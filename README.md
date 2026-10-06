@@ -115,6 +115,19 @@ npm run verify:provenance-schema
 
 `npm run test:direct-claim` requires the isolated Hardhat integration network on loopback port 18545. It creates and drops its own temporary database/wallet directory and verifies actual migrations, signup/custom codes, single and batch receipts/removals, multi-producer inventory, concurrent claims/codes, retries, privacy, logical history, rebuilds and rollback. It also runs the existing dashboard/public-history SQL integration checks. It never targets Pi. Hosted CI runs this test with disposable MySQL.
 
+Set `TRACEFORGE_TEST_UI=true` to also start an owned Next.js server on port 13478
+and run unmocked desktop/mobile browser acceptance against this API and chain.
+Install Chromium with `cd ../ui && npx playwright install chromium` first.
+Build all three applications before running. When preserving running development
+builds, use `TRACEFORGE_TEST_API_DIST=dist-phase5`,
+`TRACEFORGE_TEST_INDEXER_DIST=dist-phase5` and
+`TRACEFORGE_UI_DIST_DIR=.next-phase5` with separately compiled output directories.
+The test control server is loopback-only and authenticated with an ephemeral
+test secret; it is not part of the production API. Test manifests contain only
+synthetic identities, expire with the test, and never contain server session
+tokens, signer keys or database passwords. See
+[Phase 5 verification](https://github.com/aididalam/traceforge/blob/main/docs/batch-integration-phase5.md).
+
 `npm run test:acceptance` checks a running API without writing. `npm run verify:mysql-backup-restore` exercises database backup/restore separately. Synthetic generic provenance fixtures retain schema/secret-boundary coverage without referring to retired chain deployments.
 
 For development verification while the legacy services continue running, compile

@@ -1,5 +1,6 @@
 // A disposable MySQL database and local Hardhat chain. Never points at Pi.
 import {batchChecks} from "./batch-integration-checks.mjs";
+import {browserIntegrationChecks} from "./browser-integration-checks.mjs";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
@@ -41,7 +42,7 @@ try {
  const deployment=await client.waitForTransactionReceipt({hash:tx}),address=deployment.contractAddress;
  assert.ok(address);assert.equal(deployment.status,"success");
  await admin.query("CREATE DATABASE `"+database+"`");
- conn=await mysql.createConnection({host:local.MYSQL_HOST,port:Number(local.MYSQL_PORT),user:local.MYSQL_USER,password:local.MYSQL_PASSWORD,database,multipleStatements:true});
+ conn=await mysql.createConnection({host:local.MYSQL_HOST,port:Number(local.MYSQL_PORT),user:local.MYSQL_USER,password:local.MYSQL_PASSWORD,database,multipleStatements:true,supportBigNumbers:true,bigNumberStrings:true,charset:"utf8mb4"});
  const env={...process.env,...local,MYSQL_DATABASE:database,TRACEFORGE_CHAIN_ID:"9009",TRACEFORGE_RPC_URL:rpc,TRACEFORGE_CONTRACT_ADDRESS:address,
   TRACEFORGE_DEPLOYMENT_BLOCK:deployment.blockNumber.toString(),TRACEFORGE_RUNTIME_BYTECODE_HASH:keccak256(await client.getBytecode({address})),
   TRACEFORGE_BROADCAST_ENABLED:"true",TRACEFORGE_BUSINESS_WALLET_DIRECTORY:walletDir,INDEXER_CONFIRMATIONS:"0",API_PORT:"13301",API_HOST:"127.0.0.1"};
@@ -67,6 +68,7 @@ try {
   actors.push({name,email,token:login.body.sessionToken,user:login.body.user});
  }
  const [producer,distributor,shop,other]=actors;
+ console.log("Four isolated business accounts registered and signed in.");
  const [customType]=await conn.query("SELECT business_type FROM business_wallets WHERE organization_id=?",[distributor.user.organizationId]);
  assert.equal(customType[0].business_type,"Customs broker & inspection");
  const customBusiness=(await request("/businesses",undefined,producer.token)).body.businesses.find(item=>item.id===distributor.user.organizationId);
@@ -173,15 +175,19 @@ try {
  assert.equal((await request("/receive/"+first,undefined,shop.token)).body.name,null,"Scan preview exposed an unpublished product name");
  checks.push("Public tracking keeps named holders, product details, dates and short IDs. Private products stay hidden, and sync respects explicit unpublishing.");
  await batchChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,fetcher:testFetch});
+ console.log("Isolated single/batch backend acceptance passed.");
  invoke("api","scripts/test-operator-dashboard.mjs",env);
  invoke("api","scripts/test-public-presentation.mjs",env);
  invoke("api","scripts/test-public-discovery.mjs",env);
  checks.push("Actual migration runners and legacy temporary-table dashboard/public-history integration checks pass on the upgraded schema.");
- const [journal]=await conn.query("SELECT COUNT(*) AS total,SUM(serialized_transaction IS NOT NULL) AS signed FROM chain_write_operations WHERE status='CONFIRMED'");assert.equal(Number(journal[0].signed),0);
- const [journalAll]=await conn.query("SELECT COUNT(*) AS total,SUM(status='FAILED') AS failed FROM chain_write_operations");
  const [claims]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(claims[0].total),2);
  invoke("indexer",indexerDist+"/project.js",env);const [again]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(again[0].total),2);
  checks.push("Projector runs repeatedly without duplicate custody receipts; confirmed journals remove serialized transactions.");
+ const browser=process.env.TRACEFORGE_TEST_UI==="true"
+  ?await browserIntegrationChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,root,walletDir,fetcher:testFetch})
+  :null;
+ const [journal]=await conn.query("SELECT COUNT(*) AS total,SUM(serialized_transaction IS NOT NULL) AS signed FROM chain_write_operations WHERE status='CONFIRMED'");assert.equal(Number(journal[0].signed),0);
+ const [journalAll]=await conn.query("SELECT COUNT(*) AS total,SUM(status='FAILED') AS failed FROM chain_write_operations");
  const pendingId=randomUUID();
  await conn.query(`INSERT INTO chain_write_operations
   (operation_id,idempotency_key,request_hash,token_id,tenant_id,organization_id,entity_id,operation_name,role_id,status,transaction_hash,serialized_transaction,nonce,gas_estimate,gas_limit,request_json)
@@ -201,8 +207,9 @@ try {
  assert.equal((await read("getEntity",[other.user.tenantId,second])).closed,false);
  const [disabledJournal]=await conn.query("SELECT COUNT(*) AS total FROM chain_write_operations");assert.equal(Number(disabledJournal[0].total),Number(journalAll[0].total));
  checks.push("Disabling broadcasts blocks both generic and operator writes without creating journal entries or changing chain state.");
- await writeFile(join(tmpdir(),"TraceForge-Quantity-Integration-2026-10-06.json"),JSON.stringify({passed:true,checks,confirmedTransactions:Number(journal[0].total),failedConcurrentTransactions:Number(journalAll[0].failed)},null,2));
- console.log(JSON.stringify({passed:true,checks,confirmedTransactions:Number(journal[0].total),failedConcurrentTransactions:Number(journalAll[0].failed)},null,2));
+ const evidence={passed:true,checks,browser,confirmedTransactions:Number(journal[0].total),failedConcurrentTransactions:Number(journalAll[0].failed)};
+ await writeFile(join(tmpdir(),"TraceForge-Quantity-Integration-2026-10-06.json"),JSON.stringify(evidence,null,2));
+ console.log(JSON.stringify(evidence,null,2));
 } finally {
  child?.kill("SIGTERM");await conn?.end();
  await admin.query("DROP DATABASE IF EXISTS `"+database+"`");await admin.end();await rm(walletDir,{recursive:true,force:true});
