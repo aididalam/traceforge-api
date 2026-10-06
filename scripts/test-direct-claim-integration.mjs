@@ -45,7 +45,7 @@ try {
  const request=async(path,payload,token)=>{const response=await fetch(api+"/operator/v1"+path,{method:payload?"POST":"GET",headers:{...(payload?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{})},...(payload?{body:JSON.stringify(payload)}:{})});return {status:response.status,body:await response.json()};};
  const password="Synthetic-Only-Password-2026";
  const actors=[];
- for(const [name,type] of [["Test Producer","Producer"],["Test Distributor","Distributor"],["Test Shop","Shop"],["Other Producer","Producer"]]){
+ for(const [name,type] of [["Test Producer","Producer"],["Test Distributor","Customs broker & inspection"],["Test Shop","Shop"],["Other Producer","Producer"]]){
   const email=name.toLowerCase().replaceAll(" ",".")+"@example.test";
   const signup=await request("/signup",{email,password,name:"Test Operator",businessName:name,businessType:type,publicProfile:true});
   assert.equal(signup.status,200,JSON.stringify(signup.body));assert.equal(signup.body.created,true);sync();
@@ -53,6 +53,11 @@ try {
   actors.push({name,email,token:login.body.sessionToken,user:login.body.user});
  }
  const [producer,distributor,shop,other]=actors;
+ const [customType]=await conn.query("SELECT business_type FROM business_wallets WHERE organization_id=?",[distributor.user.organizationId]);
+ assert.equal(customType[0].business_type,"Customs broker & inspection");
+ const customBusiness=(await request("/businesses",undefined,producer.token)).body.businesses.find(item=>item.id===distributor.user.organizationId);
+ assert.equal(customBusiness.type,"Customs broker & inspection");
+ checks.push("Independent registration stores and displays an arbitrary business type; the business participates in the same dynamic custody flow.");
  const genericToken=async(actor,tenantId)=>{
   const token="Synthetic-Integration-"+randomUUID();
   await conn.query("INSERT INTO api_auth_tokens (token_id,token_hash,token_hint,tenant_id,organization_id,token_name,scopes) VALUES (?,?,?,?,?,?,?)",

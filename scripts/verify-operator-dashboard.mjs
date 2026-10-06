@@ -42,9 +42,19 @@ const db={query,getConnection:async()=>({query,beginTransaction:async()=>{},comm
 const app=Fastify({logger:false});
 await app.register(rateLimit,{max:120,timeWindow:"1 minute"});
 await app.register(swagger,{openapi:{info:{title:"Synthetic operator checks",version:"1"},components:{securitySchemes:{operatorSession:{type:"http",scheme:"bearer"}}}}});
-await registerOperatorRoutes(app,{db,chainId:9009,contractAddress:"0x"+"55".repeat(20)});
+const signups=[];
+await registerOperatorRoutes(app,{db,chainId:9009,contractAddress:"0x"+"55".repeat(20),actions:{signup:async input=>{signups.push(input);return {created:true,pending:false};}}});
 const prefix="/operator/v1",post=(suffix,body,headers={})=>app.inject({method:"POST",url:prefix+suffix,payload:body,headers});
 try{
+ const signup={email:"new.business@example.test",password,name:"New Operator",businessName:"Independent Business",businessType:"Customs broker & inspection",publicProfile:false};
+ for(const businessType of [signup.businessType,"পণ্য মেরামত ও সেবা","Producer"]){
+  const response=await post("/signup",{...signup,businessType});assert.equal(response.statusCode,200);assert.equal(signups.at(-1).businessType,businessType);
+ }
+ for(const [index,businessType] of ["","   ","x".repeat(121),"Bad\nType",null,{},42].entries()){
+  const response=await app.inject({method:"POST",url:prefix+"/signup",payload:{...signup,businessType},remoteAddress:"127.0.0."+(index+10)});
+  assert.equal(response.statusCode,400);
+ }
+ assert.equal(signups.length,3,"Invalid business types reached business registration");
  const before=calls;
  for(const prefixPart of ["/operator","/%6fperator","/operat%6fr"])assert.equal((await app.inject(prefixPart+"/v1/products")).statusCode,401);
  assert.equal(calls,before,"Unauthenticated reads accessed DB");

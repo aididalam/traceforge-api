@@ -48,6 +48,8 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
       const allowed=route.endsWith("/signup")?["email","password","name","businessName","businessType","publicProfile"]:route.endsWith("/create")?["name","description","fields","publish","idempotencyKey"]:route.endsWith("/receive")?["version","confirmed","idempotencyKey"]:route.endsWith("/close")?["reason","confirmed","idempotencyKey"]:route.endsWith("/login")?["email","password"]:route.endsWith("/activate")?["email","password","name","invitationCode"]:[];
       if(request.body&&typeof request.body==='object'&&Object.keys(request.body).some(key=>!allowed.includes(key)))
         return reply.code(400).send(failure("invalid_request","Check the information provided."));
+      if(route.endsWith("/signup")&&(!request.body||typeof (request.body as Record<string,unknown>).businessType!=="string"))
+        return reply.code(400).send(failure("invalid_request","Enter a business type."));
       if(route.endsWith("/create")&&request.body&&typeof request.body==='object'){
         try{normalizeProductFields((request.body as Record<string,unknown>).fields);}
         catch{return reply.code(400).send(failure("invalid_request","Check the additional product details."));}
@@ -79,10 +81,10 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
       schema:{tags:["operator-access"],security:[],querystring:noQuery,body:{...loginBody,
         required:["email","password","name","businessName","businessType","publicProfile"],properties:{...loginBody.properties,
           password:{type:"string",minLength:12,maxLength:128},name:{type:"string",minLength:1,maxLength:120},
-          businessName:{type:"string",minLength:1,maxLength:120},businessType:{type:"string",enum:["Producer","Distributor","Transporter","Warehouse","Shop","Other business"]},
+          businessName:{type:"string",minLength:1,maxLength:120},businessType:{type:"string",minLength:1,maxLength:120,pattern:"^[^\\u0000-\\u001f\\u007f]*$"},
           publicProfile:{type:"boolean"}}}}},async(request,reply)=>{
-      if(!emailPattern.test(request.body.email.trim().toLowerCase())||![request.body.name,request.body.businessName].every(value=>value.trim()))
-        return reply.code(400).send(failure("invalid_request","Check your name and email address."));
+      if(!emailPattern.test(request.body.email.trim().toLowerCase())||![request.body.name,request.body.businessName,request.body.businessType].every(value=>value.trim()))
+        return reply.code(400).send(failure("invalid_request","Check your name, business details and email address."));
       if(!deps.actions)return reply.code(503).send(failure("signup_unavailable","Business signup is temporarily unavailable."));
       return deps.actions.signup(request.body);
     });

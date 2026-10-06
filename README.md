@@ -31,6 +31,12 @@ Apply indexer migrations first. Business writes require `TRACEFORGE_BROADCAST_EN
 
 Receiving and closing consult global active business identity. Production workspace roles still protect creating and editing products. Optional staff activation uses an email-bound invitation. Public trace publication, business-name consent and private-document omission remain explicit.
 
+Signup accepts any `businessType` as nonblank text up to 120 characters, including
+custom types and Unicode. Suggested types in the UI are optional. The type is
+stored in business metadata and describes the business; it is not an allowlist
+of supply-chain participants or a receiving permission. Existing types remain
+compatible. Control characters and non-string input are rejected.
+
 All writes require an idempotency key in the validated body. The signed transaction is journaled before broadcast; retries reuse it. A per-wallet database lock protects nonce allocation. Receipt events verify actor, product, evidence and custody version. Browser requests use fixed Next.js routes with origin validation and HttpOnly cookies; server wallet keys never reach the browser.
 
 Generic `/v1/*` token-scoped read/production APIs remain available. `CUSTODY_CLAIM` and `ENTITY_CLOSE` preflight use global business identity. There are no proposal, acceptance, cancellation or pending-custody endpoints.
