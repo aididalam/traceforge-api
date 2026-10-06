@@ -14,6 +14,7 @@ import type {
 import {
   db,
 } from "./db.js";
+import {backfillBusinessCodes} from "./business-codes.js";
 
 interface MigrationRow
   extends RowDataPacket {
@@ -159,7 +160,10 @@ for (
   }
 }
 
-await db.end();
+try {
+  const count=await backfillBusinessCodes(db);
+  console.log(`Business code reservations verified for ${count} businesses.`);
+} finally {await db.end();}
 
 console.log();
 console.log(

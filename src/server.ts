@@ -26,6 +26,7 @@ import { registerDiscoveryRoutes } from "./routes/discovery.js";
 import { registerPublicDiscoveryRoutes } from "./routes/public-discovery.js";
 import { registerPublicTrackingRoutes } from "./routes/public-tracking.js";
 import { registerPublicShortLinkRoutes } from "./routes/public-short-links.js";
+import { registerPublicProductRoutes } from "./routes/public-products.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { businessActions } from "./business.js";
 import { registerOperatorRoutes } from "./routes/operator.js";
@@ -1463,6 +1464,7 @@ await registerGenericWriteBroadcastRoutes(app);
 await registerDiscoveryRoutes(app);
 await registerPublicTrackingRoutes(app, { db });
 await registerPublicShortLinkRoutes(app, { db });
+await registerPublicProductRoutes(app,{db,chainId:config.traceforge.chainId,contractAddress:config.traceforge.contractAddress});
 await registerPublicDiscoveryRoutes(app, {
   db,
   chainId: config.traceforge.chainId,

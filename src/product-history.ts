@@ -19,4 +19,15 @@ export const businessHistoryPredicate = `NOT (ce.event_name = 'TraceRecorded' AN
     AND CASE companion.event_name
       WHEN 'EntityClosed' THEN JSON_EXTRACT(companion.event_args, '$.closedAt')
       ELSE JSON_EXTRACT(companion.event_args, '$.timestamp') END = JSON_EXTRACT(ce.event_args, '$.timestamp')
+)) AND NOT (ce.event_name = 'EntityCreated' AND EXISTS (
+ SELECT 1 FROM chain_events registration
+ WHERE registration.chain_id=ce.chain_id AND registration.contract_address=ce.contract_address
+  AND registration.transaction_hash=ce.transaction_hash AND registration.log_index=ce.log_index+1
+  AND registration.event_name='ProductRegistered'
+  AND JSON_EXTRACT(registration.event_args,'$.tenantId')=JSON_EXTRACT(ce.event_args,'$.tenantId')
+  AND JSON_EXTRACT(registration.event_args,'$.entityId')=JSON_EXTRACT(ce.event_args,'$.entityId')
+  AND JSON_EXTRACT(registration.event_args,'$.organizationId')=JSON_EXTRACT(ce.event_args,'$.organizationId')
+  AND JSON_EXTRACT(registration.event_args,'$.actor')=JSON_EXTRACT(ce.event_args,'$.actor')
+  AND JSON_EXTRACT(registration.event_args,'$.registrationMetadataHash')=JSON_EXTRACT(ce.event_args,'$.metadataHash')
+  AND JSON_EXTRACT(registration.event_args,'$.timestamp')=JSON_EXTRACT(ce.event_args,'$.createdAt')
 ))`;

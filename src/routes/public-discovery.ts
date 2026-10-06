@@ -2,6 +2,9 @@ import type { FastifyInstance } from "fastify";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { readPublicPresentation, publicOrganization, publicTimestamp } from "../public-presentation.js";
 import type { Presentation } from "../public-presentation.js";
+import { quantitySummary,publicBusinessProfiles } from "../product-quantity.js";
+import { quantitySchema, movementSchema } from "../product-schemas.js";
+import { removalReasons } from "../product-input.js";
 import { businessHistoryPredicate } from "../product-history.js";
 
 interface Dependencies {
@@ -32,6 +35,7 @@ interface EntityRow extends RowDataPacket {
   closed: number | boolean;
   created_at: string | number;
   closed_at: string | number | null;
+  initial_quantity?: string | number | null;
 }
 
 interface EventRow extends RowDataPacket {
@@ -53,6 +57,9 @@ interface EventRow extends RowDataPacket {
   organization_id: string | null;
   from_organization_id: string | null;
   to_organization_id: string | null;
+  quantity: string | null; initial_quantity: string | null;
+  removal_reason: string | null; reason_text: string | null;
+  source_route_id: string | null; received_route_id: string | null;
 }
 
 const bytes32 = { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" } as const;
@@ -87,6 +94,7 @@ const entitySchema = {
     closedAt: nullableString,
     productInfo: productInfoSchema,
     currentHolder: organizationSchema,
+    quantity: quantitySchema,
   },
 } as const;
 
@@ -110,6 +118,7 @@ const eventSchema = {
     metadataHash: nullableString,
     evidenceHash: nullableString,
     occurredAt: nullableString,
+    quantity: movementSchema,
     organization: organizationSchema,
     transfer: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
       required: ["from", "to"], properties: { from: organizationSchema, to: organizationSchema } }] },
@@ -174,7 +183,16 @@ function pagination(query: HistoryQuery) {
 export async function registerPublicDiscoveryRoutes(app: FastifyInstance, dependencies: Dependencies) {
   const { db, chainId } = dependencies;
   const contractAddress = dependencies.contractAddress.toLowerCase();
-  const scope = [chainId, contractAddress];
+  const scope: [number,string] = [chainId, contractAddress];
+  async function profiles(entity:EntityRow,presentation:Presentation,ids:string[]){
+    if(entity.initial_quantity==null)return presentation;
+    const organizations=await publicBusinessProfiles(db,ids);
+    return {...presentation,organizations:new Map(organizations.map(org=>[org.id,org]))};
+  }
+  async function details(entity:EntityRow,presentation:Presentation){
+    const quantity=entity.initial_quantity==null?null:await quantitySummary(db,scope,entity.tenant_id,entity.entity_id);
+    return {...entityResponse(entity,presentation),...(quantity?{quantity}:{})};
+  }
 
   async function publishedEntity(params: EntityParams): Promise<EntityRow | null> {
     const [rows] = await db.query<EntityRow[]>(
@@ -183,16 +201,17 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
               e.current_state, st.display_label AS current_state_label,
               e.current_custodian, e.closed,
               CAST(e.created_at AS CHAR) AS created_at,
-              CAST(e.closed_at AS CHAR) AS closed_at
+              CAST(e.closed_at AS CHAR) AS closed_at, q.initial_quantity
        FROM public_entity_publications p
        JOIN entities e ON e.tenant_id = p.tenant_id AND e.entity_id = p.entity_id
        LEFT JOIN semantic_registry et ON et.chain_id = ? AND et.contract_address = ?
          AND et.semantic_kind = 'entity_type' AND et.semantic_hash = e.entity_type
        LEFT JOIN semantic_registry st ON st.chain_id = ? AND st.contract_address = ?
          AND st.semantic_kind = 'state' AND st.semantic_hash = e.current_state
+       LEFT JOIN product_quantities q ON q.chain_id=? AND q.contract_address=? AND q.tenant_id=e.tenant_id AND q.entity_id=e.entity_id
        WHERE p.tenant_id = ? AND p.entity_id = ?
        LIMIT 1`,
-      [...scope, ...scope, params.tenantId.toLowerCase(), params.entityId.toLowerCase()],
+      [...scope, ...scope, ...scope, params.tenantId.toLowerCase(), params.entityId.toLowerCase()],
     );
     return rows[0] ?? null;
   }
@@ -220,7 +239,7 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
       return apiError("entity_not_found", "Entity was not found.");
     }
     const presentation = await readPublicPresentation(db, entity.tenant_id, entity.entity_id, entity.metadata_hash);
-    return entityResponse(entity, presentation);
+    return details(entity,await profiles(entity,presentation,[entity.current_custodian]));
   });
 
   app.get<{ Params: EntityParams; Querystring: HistoryQuery }>(route + "/history", {
@@ -288,6 +307,9 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
               JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.evidenceHash')) AS evidence_hash,
               CASE ce.event_name
                 WHEN 'EntityCreated' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.createdAt'))
+                WHEN 'ProductRegistered' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.timestamp'))
+                WHEN 'BatchReceived' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.timestamp'))
+                WHEN 'QuantityRemoved' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.timestamp'))
                 WHEN 'TraceRecorded' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.timestamp'))
                 WHEN 'CustodyClaimed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.timestamp'))
                 WHEN 'EntityLinkCreated' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.createdAt'))
@@ -296,12 +318,19 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
               END AS occurred_at,
               CASE ce.event_name
                 WHEN 'CustodyClaimed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId'))
+                WHEN 'BatchReceived' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId'))
                 ELSE JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.organizationId'))
               END AS organization_id,
-              CASE WHEN ce.event_name = 'CustodyClaimed'
+              CASE WHEN ce.event_name IN ('CustodyClaimed','BatchReceived')
                 THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.fromOrganizationId')) END AS from_organization_id,
-              CASE WHEN ce.event_name = 'CustodyClaimed'
-                THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId')) END AS to_organization_id
+              CASE WHEN ce.event_name IN ('CustodyClaimed','BatchReceived')
+                THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.toOrganizationId')) END AS to_organization_id,
+              JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.quantity')) AS quantity,
+              JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.initialQuantity')) AS initial_quantity,
+              JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.reason')) AS removal_reason,
+              JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.reasonText')) AS reason_text,
+              COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.sourceRouteId')),JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.routeId'))) AS source_route_id,
+              JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.receivedRouteId')) AS received_route_id
        FROM chain_events ce
        JOIN public_entity_publications p ON p.tenant_id = ? AND p.entity_id = ?
          AND p.tenant_id = JSON_UNQUOTE(JSON_EXTRACT(ce.event_args, '$.tenantId'))
@@ -335,11 +364,12 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
     );
     const hasMore = rows.length > page.limit;
     const visible = rows.slice(0, page.limit);
-    const presentation = await readPublicPresentation(db, entity.tenant_id, entity.entity_id, entity.metadata_hash);
+    const snapshot = await readPublicPresentation(db, entity.tenant_id, entity.entity_id, entity.metadata_hash);
+    const presentation=await profiles(entity,snapshot,[entity.current_custodian,...visible.flatMap(row=>[row.organization_id,row.from_organization_id,row.to_organization_id].filter((id):id is string=>id!==null))]);
     return {
       tenantId: entity.tenant_id,
       entityId: entity.entity_id,
-      entity: entityResponse(entity, presentation),
+      entity: await details(entity, presentation),
       events: visible.map(row => ({
         eventId: String(row.id),
         eventName: row.event_name,
@@ -356,6 +386,10 @@ export async function registerPublicDiscoveryRoutes(app: FastifyInstance, depend
         metadataHash: row.metadata_hash,
         evidenceHash: row.evidence_hash,
         occurredAt: publicTimestamp(row.occurred_at),
+        ...(["ProductRegistered","BatchReceived","QuantityRemoved"].includes(row.event_name)?{quantity:{
+          quantity:row.quantity??null,initialQuantity:row.initial_quantity??null,
+          reason:row.removal_reason==null?null:removalReasons[Number(row.removal_reason)],reasonText:row.reason_text??null,
+          sourceRouteId:row.source_route_id??null,receivedRouteId:row.received_route_id??null}}:{}),
         organization: publicOrganization(row.organization_id, presentation),
         transfer: row.from_organization_id || row.to_organization_id ? {
           from: publicOrganization(row.from_organization_id, presentation),

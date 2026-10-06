@@ -1,3 +1,4 @@
+import {loadSourceFile} from "./test-source-loader.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
@@ -10,7 +11,7 @@ const moduleUrl = url(source);
 const { validatePresentation, readPublicPresentation, publicTimestamp, savePublicPresentation } = await import(moduleUrl);
 const historyUrl = url(readFileSync("src/product-history.ts", "utf8"));
 const routeSource = readFileSync("src/routes/public-discovery.ts", "utf8");
-const { registerPublicDiscoveryRoutes } = await import(url(routeSource.replace('"../public-presentation.js"', JSON.stringify(moduleUrl)).replace('"../product-history.js"', JSON.stringify(historyUrl))));
+const {registerPublicDiscoveryRoutes}=await loadSourceFile("src/routes/public-discovery.ts");
 const h = byte => "0x" + byte.repeat(32);
 const tenant = h("ab"), entity = h("cd"), hash = h("44"), otherHash = h("55");
 const producer = { id: h("11"), metadataHash: h("66"), name: "Demo Producer", type: "Producer" };

@@ -24,6 +24,8 @@ export const db =
     connectionLimit:
       10,
 
+    supportBigNumbers: true,
+    bigNumberStrings: true,
     charset:
       "utf8mb4",
   });

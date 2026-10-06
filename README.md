@@ -17,53 +17,80 @@ npm start
 
 Apply indexer migrations first. Business writes require `TRACEFORGE_BROADCAST_ENABLED=true` and an owner-only `TRACEFORGE_BUSINESS_WALLET_DIRECTORY`. The repository default disables writes. Keys and credentials must never be committed.
 
-## Independent business flow
+## Product ID and batch API (Phase 3)
 
-- `POST /operator/v1/signup`: independently register a business and its own production workspace; no invitation required.
-- `POST /operator/v1/login`: email/password login; hashed expiring API sessions.
-- `POST /operator/v1/products/create`: add a product with an explicit public sharing choice.
-- `GET /operator/v1/receive/:trackingId`: scan preview for a full ID or short code; never changes custody.
-- `POST /operator/v1/products/:productId/receive`: receiver confirms physical receipt; expected custody version rejects stale claims.
-- `POST /operator/v1/products/:productId/close`: current holder ends tracking with Sold/Lost/Damaged/Disposed.
-- `GET /operator/v1/products`: products the signed-in business produced or handled, across producers.
-- `GET /operator/v1/products/:productId/history`: named, dated supply history.
-- `GET /operator/v1/businesses` and `/operations`: business directory and actor-scoped operation status.
+The quantity upgrade is implemented and tested against a disposable deployment.
+Activation on Pi follows the UI and deployment phases; the existing local API/UI
+continue to use the older deployment. Apply indexer migration 006 and API
+migration 010 before starting this API build on the upgraded deployment.
 
-Receiving and closing consult global active business identity. Production workspace roles still protect creating and editing products. Optional staff activation uses an email-bound invitation. Public trace publication, business-name consent and private-document omission remain explicit.
+- Signup accepts a descriptive `businessType` and optional available `businessCode`.
+  Automatic codes use A–Z and 0–9, starting at one character and increasing as
+  combinations fill. `/operator/v1/me` includes the reserved code. This code is
+  a database convenience for printed references and conveys no blockchain permission.
+- `POST /operator/v1/products/create` requires `name`, `id`, `publish` and
+  `idempotencyKey`. Optional `quantity` defaults to 1; greater values register
+  batches. Counts are positive JSON safe integers. Optional `fields` supply
+  additional label/value details; reserved ID/quantity labels cannot be overridden.
+  Normalized registration JSON contains `schemaVersion: 2`, `name`, `id`,
+  initial `quantity` and `fields`. The original reference/hash remain fixed.
+- A confirmed registration returns a globally unique full Tracking ID and a
+  reserved 12-character `shortCode`, including for private registrations and
+  before projection finishes. Public resolution remains publication gated.
+- `GET /operator/v1/products/search?id=...&businessCode=...&after=...&limit=...`
+  returns exact, case-sensitive external-ID matches. Duplicate references are
+  permitted. Results include shared products and records the caller created or
+  handled. The optional code filter identifies the originating business.
+- `GET /operator/v1/receive/:trackingId` resolves full/short codes without writing.
+  A batch preview includes the first page of available routes and global counts;
+  a private preview omits its product name, external ID and metadata fields.
+- `GET /operator/v1/products/:productId/routes` and `/holders` paginate active
+  paths and aggregated current holders. Source/parent IDs, consented names,
+  receipt times, quantities and versions distinguish repeated receipts.
+- `POST /operator/v1/products/:productId/receive` requires confirmation, version
+  and an idempotency key. Batches also require `sourceRouteId` and `quantity`.
+  Each batch receipt creates a distinct child path and debits the source; it
+  never changes the global available count. No sender proposal, producer
+  membership or receiving-role approval is required.
+- `POST /operator/v1/products/:productId/remove` requires confirmation, version
+  and an idempotency key. Batches also require `routeId` and `quantity`.
+  Only that path's holder can remove its available items. Reason defaults to
+  `Sold`; `Lost`, `Damaged`, `Spoiled`, `Disposed` and `Other` require `reasonText`.
+  The text is stored on chain (256 Unicode characters / 1024 UTF-8 bytes maximum).
+  Singles remove one item. `/close` remains a compatibility alias; newly
+  registered singles also require their current version and the new reason rules.
+- `/products` reports cross-producer inventory and the caller's available count.
+  `/products/:productId/history` reports one dated operation per registration,
+  receipt or removal. Raw paired logs remain intact for audit.
 
-Signup accepts any `businessType` as nonblank text up to 120 characters, including
-custom types and Unicode. Suggested types in the UI are optional. The type is
-stored in business metadata and describes the business; it is not an allowlist
-of supply-chain participants or a receiving permission. Existing types remain
-compatible. Control characters and non-string input are rejected.
+Writes preserve simulation, wallet locking, journal-before-broadcast, exact-payload
+idempotency and mined-receipt verification. Source versions prevent stale and
+competing receipts/removals from overdrawing stock. Read counts, timestamps and
+versions are decimal strings. Pagination defaults to 50 and allows at most 100;
+global/own totals are computed across all paths, independently of the page.
 
-All writes require an idempotency key in the validated body. The signed transaction is journaled before broadcast; retries reuse it. A per-wallet database lock protects nonce allocation. Receipt events verify actor, product, evidence and custody version. Browser requests use fixed Next.js routes with origin validation and HttpOnly cookies; server wallet keys never reach the browser.
+Public quantity/search paths:
 
-Generic `/v1/*` token-scoped read/production APIs remain available. `CUSTODY_CLAIM` and `ENTITY_CLOSE` preflight use global business identity. There are no proposal, acceptance, cancellation or pending-custody endpoints.
+| Route | Response |
+| --- | --- |
+| `/public/v1/products/search?id=...&businessCode=...&after=...&limit=...` | Shared external-ID matches, origin attribution and availability |
+| `/public/v1/products/:trackingId/quantity` | Original ID, initial/available/removed counts, classification and six reason totals |
+| `/public/v1/products/:trackingId/routes?after=...&limit=...` | Available receipt routes, parent/owner attribution and versions |
+| `/public/v1/products/:trackingId/holders?after=...&limit=...` | Per-business available stock across its paths |
 
-Product creation accepts an optional `fields` array of `{ label, value }` text
-pairs (maximum 32, unique names up to 80 characters, values up to 1,000).
-Custom fields are stored inside the product metadata JSON and included in its
-on-chain hash. Operator details resolve the fields from the hash-bound document;
-public display copies them only for an explicitly shared product. A missing or
-empty array keeps compatibility with existing name/description-only products.
-Legacy Units/Packaging/Quality/Revision fields remain readable. Dynamic values
-are displayed as plain text, preserving their capitalization and contents.
+These routes require explicit product publication, enforce fixed response fields
+and return no private documents, actor wallets, evidence bodies or credentials.
+Existing tenant/entity detail/history routes include quantity summaries and
+quantity movements for registered products, while retaining legacy record shapes.
+Public history names use the businesses' current sharing consent and can span
+more than 32 participants. Optional staff invitations remain email-bound.
 
-The generated contract ABI includes the 2026-10-06 quantity/route operations.
-The [batch upgrade](https://github.com/aididalam/traceforge/blob/main/docs/batch-quantity-plan.md)
-is being delivered in phases: contract accounting is implemented, while required
-external-ID validation, quantity HTTP workflows, route/search responses and DB
-migrations are the next phase. These HTTP endpoints still use the existing
-whole-product flow until that implementation and deployment are complete.
+The migration runner automatically reserves missing codes for existing business
+accounts and preserves existing/custom reservations. To repeat that backfill:
 
-Operator and public product histories show one business action per receive or
-removal. The contract emits a matching TraceRecorded log immediately after the
-action event. A shared SQL predicate excludes only that exact companion before
-LIMIT/cursor pagination, matching chain, contract, transaction, adjacent log,
-product, workspace, event type, evidence, actor, business and time. Separate
-updates in the same transaction stay visible. All indexed raw logs and generic
-technical discovery responses remain unchanged.
+```sh
+npm run business:codes:backfill
+```
 
 ## Public tracking
 
@@ -81,9 +108,24 @@ npm run verify:public-tracking
 npm run verify:public-presentation
 npm run verify:public-short-links
 npm run verify:operator-dashboard
+npm run verify:product-input
+npm run verify:public-products
 npm run verify:provenance-schema
 ```
 
-`npm run test:direct-claim` requires the isolated Hardhat integration network on loopback port 18545. It creates and drops its own temporary database/wallet directory and verifies signup, multi-producer inventory, real signed claims, closure, retries, privacy and projections. It never targets Pi. Hosted CI runs this test with disposable MySQL.
+`npm run test:direct-claim` requires the isolated Hardhat integration network on loopback port 18545. It creates and drops its own temporary database/wallet directory and verifies actual migrations, signup/custom codes, single and batch receipts/removals, multi-producer inventory, concurrent claims/codes, retries, privacy, logical history, rebuilds and rollback. It also runs the existing dashboard/public-history SQL integration checks. It never targets Pi. Hosted CI runs this test with disposable MySQL.
 
 `npm run test:acceptance` checks a running API without writing. `npm run verify:mysql-backup-restore` exercises database backup/restore separately. Synthetic generic provenance fixtures retain schema/secret-boundary coverage without referring to retired chain deployments.
+
+For development verification while the legacy services continue running, compile
+both API and indexer with `tsc --outDir dist-phase3`, then run:
+
+```sh
+TRACEFORGE_TEST_API_DIST=dist-phase3 TRACEFORGE_TEST_INDEXER_DIST=dist-phase3 npm run test:direct-claim
+```
+
+The harness respects production rate limits and removes only its own temporary
+database and wallet directory. It deploys the compiled contract to localhost
+port 18545 and starts an isolated API on port 13301. A stale concurrent operation
+may be rejected before broadcast or recorded as a reverted transaction; either
+case leaves exactly one successful receipt and conserved stock.

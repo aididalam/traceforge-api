@@ -1,3 +1,4 @@
+import {loadSourceFile} from "./test-source-loader.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -49,7 +50,7 @@ assert.match(moduleText, /ce\.id > CAST\(\? AS UNSIGNED\)/);
 assert.doesNotMatch(moduleText, /OFFSET\s/i);
 const presentationUrl = "data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync("src/public-presentation.ts", "utf8"))).toString("base64");
 const historyUrl = "data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync("src/product-history.ts", "utf8"))).toString("base64");
-const { registerPublicDiscoveryRoutes } = await loadSource(moduleText.replace('"../public-presentation.js"', JSON.stringify(presentationUrl)).replace('"../product-history.js"', JSON.stringify(historyUrl)));
+const { registerPublicDiscoveryRoutes } = await loadSourceFile("src/routes/public-discovery.ts");
 
 const tenantId = "0x" + "ab".repeat(32);
 const entityId = "0x" + "cd".repeat(32);

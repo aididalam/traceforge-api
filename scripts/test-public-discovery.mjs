@@ -1,3 +1,4 @@
+const apiDist=process.env.TRACEFORGE_TEST_API_DIST??"dist";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -8,8 +9,8 @@ import { setTimeout as delay } from "node:timers/promises";
 // never read operator tokens/keys or expose credentials. All DB writes below
 // (including the CLI) are limited to initially unpublished fixture entities.
 process.env.TRACEFORGE_BROADCAST_ENABLED = "false";
-const { db } = await import("../dist/db.js");
-const { config } = await import("../dist/config.js");
+const { db } = await import("../"+apiDist+"/db.js");
+const { config } = await import("../"+apiDist+"/config.js");
 assert.equal(config.traceforge.broadcastEnabled, false);
 const childEnv = {
   ...process.env,
@@ -37,7 +38,7 @@ async function readonlyCounts() {
 }
 
 async function cli(args, expected, success) {
-  const child = spawn(process.execPath, ["dist/set-public-entity.js", ...args], { env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [apiDist+"/set-public-entity.js", ...args], { env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });
@@ -59,7 +60,7 @@ async function startApi() {
   await once(socket, "listening");
   const port = socket.address().port;
   await new Promise((resolve, reject) => socket.close(error => error ? reject(error) : resolve()));
-  const child = spawn(process.execPath, ["dist/server.js"], {
+  const child = spawn(process.execPath, [apiDist+"/server.js"], {
     env: { ...childEnv, API_HOST: "127.0.0.1", API_PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -112,8 +113,8 @@ function assertSafeHistory(result) {
   assert.equal(result.headers.get("cache-control"), "no-store");
   assert.deepEqual(Object.keys(result.body).sort(), ["tenantId", "entityId", "entity", "events", "page"].sort());
   assert.deepEqual(Object.keys(result.body.page).sort(), ["limit", "hasMore", "nextAfterEventId"].sort());
-  assert.deepEqual(Object.keys(result.body.entity).sort(), entityKeys);
-  for (const event of result.body.events) assert.deepEqual(Object.keys(event).sort(), eventKeys);
+  assert.deepEqual(Object.keys(result.body.entity).sort(), [...entityKeys,...(result.body.entity.quantity?["quantity"]:[])].sort());
+  for (const event of result.body.events) assert.deepEqual(Object.keys(event).sort(), [...eventKeys,...(event.quantity?["quantity"]:[])].sort());
 }
 
 async function allHistory(server, path, limit) {
@@ -190,10 +191,10 @@ try {
   const upperIds = ["--tenant", "0x" + tenantId.slice(2).toUpperCase(), "--entity", "0x" + entityId.slice(2).toUpperCase()];
   await cli([...upperIds, "--publish"], "PUBLIC ENTITY PUBLISHED.", true);
   await cli([...ids, "--publish"], "PUBLIC ENTITY PUBLISHED.", true);
-  assert.equal((await query("SELECT COUNT(*) AS count FROM public_entity_publications WHERE tenant_id = ? AND entity_id = ?", [tenantId, entityId]))[0].count, 1);
+  assert.equal(Number((await query("SELECT COUNT(*) AS count FROM public_entity_publications WHERE tenant_id = ? AND entity_id = ?", [tenantId, entityId]))[0].count), 1);
   const detail = await get(server, path);
   assert.equal(detail.status, 200);
-  assert.deepEqual(Object.keys(detail.body).sort(), entityKeys);
+  assert.deepEqual(Object.keys(detail.body).sort(), [...entityKeys,...(detail.body.quantity?["quantity"]:[])].sort());
   assert.equal(detail.headers.get("cache-control"), "no-store");
   for (const prefix of ["/%70ublic/v1", "/public/v%31"]) assert.deepEqual((await get(server, path.replace("/public/v1", prefix))).body, detail.body);
   const upperPath = path.replace(tenantId, "0x" + tenantId.slice(2).toUpperCase()).replace(entityId, "0x" + entityId.slice(2).toUpperCase());
@@ -220,7 +221,7 @@ try {
 
   // Independently derive expected visibility from event identifiers and the
   // publication snapshot, instead of reproducing the route's SQL expression.
-  const raw = await query(`SELECT CAST(id AS CHAR) AS id, event_name,
+  const raw = await query(`SELECT CAST(id AS CHAR) AS id, event_name,transaction_hash,log_index,event_args,
       JSON_UNQUOTE(JSON_EXTRACT(event_args, '$.entityId')) AS entity_id,
       JSON_UNQUOTE(JSON_EXTRACT(event_args, '$.sourceEntityId')) AS source_id,
       JSON_UNQUOTE(JSON_EXTRACT(event_args, '$.targetEntityId')) AS target_id
@@ -229,7 +230,24 @@ try {
   const expectedIds = async () => {
     const publications = await publicationSnapshot();
     const published = new Set(publications.filter(p => p.tenant_id === tenantId).map(p => p.entity_id));
-    return raw.filter(e => e.entity_id === entityId || ((e.source_id === entityId || e.target_id === entityId) && published.has(e.source_id) && published.has(e.target_id))).map(e => String(e.id));
+    const args=row=>typeof row.event_args==="string"?JSON.parse(row.event_args):row.event_args;
+    const matches=(a,b,keys)=>keys.every(key=>a[key]!==undefined&&a[key]===b[key]);
+    const logical=raw.filter(row=>{
+      if(row.event_name==="EntityCreated")return !raw.some(next=>{
+        const a=args(row),b=args(next);
+        return next.event_name==="ProductRegistered"&&next.transaction_hash===row.transaction_hash&&next.log_index===row.log_index+1&&
+          matches(a,b,["tenantId","entityId","organizationId","actor"])&&a.metadataHash===b.registrationMetadataHash&&a.createdAt===b.timestamp;
+      });
+      if(row.event_name!=="TraceRecorded")return true;
+      return !raw.some(previous=>{
+        const a=args(row),b=args(previous);
+        return ["CustodyClaimed","EntityClosed"].includes(previous.event_name)&&previous.transaction_hash===row.transaction_hash&&previous.log_index+1===row.log_index&&
+          matches(a,b,["tenantId","entityId","eventType","evidenceHash","actor"])&&
+          a.organizationId===(previous.event_name==="CustodyClaimed"?b.toOrganizationId:b.organizationId)&&
+          a.timestamp===(previous.event_name==="EntityClosed"?b.closedAt:b.timestamp);
+      });
+    });
+    return logical.filter(e => e.entity_id === entityId || ((e.source_id === entityId || e.target_id === entityId) && published.has(e.source_id) && published.has(e.target_id))).map(e => String(e.id));
   };
   assert.deepEqual(all.map(e => e.eventId), await expectedIds());
   const counterparts = await query(`SELECT e.tenant_id, e.entity_id FROM entity_links l JOIN entities e

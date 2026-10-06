@@ -1,6 +1,7 @@
 // A disposable MySQL database and local Hardhat chain. Never points at Pi.
+import {batchChecks} from "./batch-integration-checks.mjs";
 import assert from "node:assert/strict";
-import { readFile, readdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import { resolve, join } from "node:path";
@@ -9,6 +10,7 @@ import mysql from "mysql2/promise";
 import dotenv from "dotenv";
 import { createPublicClient, createWalletClient, defineChain, http, keccak256, stringToHex } from "viem";
 
+const apiDist=process.env.TRACEFORGE_TEST_API_DIST??"dist",indexerDist=process.env.TRACEFORGE_TEST_INDEXER_DIST??"dist";
 const root=resolve(".."),rpc="http://127.0.0.1:18545",api="http://127.0.0.1:13301";
 const local={...process.env,...dotenv.parse(await readFile(".env","utf8").catch(error=>{if(error.code!=="ENOENT")throw error;return "";}))};
 const database="traceforge_test_claim_"+randomUUID().replaceAll("-","");
@@ -16,9 +18,17 @@ const walletDir=await mkdtemp(join(tmpdir(),"traceforge-claim-wallets-"));
 const admin=await mysql.createConnection({host:local.MYSQL_HOST,port:Number(local.MYSQL_PORT),user:local.MYSQL_USER,password:local.MYSQL_PASSWORD,multipleStatements:true});
 const chain=defineChain({id:9009,name:"Isolated TraceForge integration",nativeCurrency:{name:"Ether",symbol:"ETH",decimals:18},rpcUrls:{default:{http:[rpc]}}});
 const client=createPublicClient({chain,transport:http(rpc)}),checks=[];
+async function testFetch(...args){
+ for(let attempt=0;attempt<3;attempt++){
+  const response=await fetch(...args);
+  if(response.status!==429 || (await response.clone().json()).error?.code!=="rate_limit_exceeded")return response;
+  await new Promise(done=>setTimeout(done,Math.min(60,Number(response.headers.get("retry-after")??60))*1000+100));
+ }
+ throw Error("Integration request exhausted its rate-limit retries.");
+}
 let child,conn;
-const invoke=(folder,file,env)=>{
- const result=spawnSync(process.execPath,[file],{cwd:resolve(root,folder),env,encoding:"utf8",timeout:30000});
+const invoke=(folder,file,env,args=[])=>{
+ const result=spawnSync(process.execPath,[file,...args],{cwd:resolve(root,folder),env,encoding:"utf8",timeout:30000});
  if(result.status!==0)throw Error(`Isolated ${folder}/${file} failed: ${result.stderr.split("\n").filter(line=>!line.includes("data:text")).slice(-8).join("\n")}`);
 };
 try {
@@ -32,17 +42,21 @@ try {
  assert.ok(address);assert.equal(deployment.status,"success");
  await admin.query("CREATE DATABASE `"+database+"`");
  conn=await mysql.createConnection({host:local.MYSQL_HOST,port:Number(local.MYSQL_PORT),user:local.MYSQL_USER,password:local.MYSQL_PASSWORD,database,multipleStatements:true});
- for(const folder of ["indexer","api"]){for(const filename of (await readdir(resolve(root,folder,"migrations"))).filter(file=>file.endsWith(".sql")).sort())await conn.query(await readFile(resolve(root,folder,"migrations",filename),"utf8"));}
  const env={...process.env,...local,MYSQL_DATABASE:database,TRACEFORGE_CHAIN_ID:"9009",TRACEFORGE_RPC_URL:rpc,TRACEFORGE_CONTRACT_ADDRESS:address,
   TRACEFORGE_DEPLOYMENT_BLOCK:deployment.blockNumber.toString(),TRACEFORGE_RUNTIME_BYTECODE_HASH:keccak256(await client.getBytecode({address})),
   TRACEFORGE_BROADCAST_ENABLED:"true",TRACEFORGE_BUSINESS_WALLET_DIRECTORY:walletDir,INDEXER_CONFIRMATIONS:"0",API_PORT:"13301",API_HOST:"127.0.0.1"};
+ invoke("indexer",indexerDist+"/migrate.js",env);
+ invoke("api",apiDist+"/api-migrate.js",env);
  delete env.TRACEFORGE_SIGNER_MAP_FILE;delete env.TRACEFORGE_SIGNER_KEY_FILE;delete env.TRACEFORGE_SIGNER_ADDRESS;
+ env.API_BASE_URL=api;
  let stderr="";
- child=spawn(process.execPath,["dist/server.js"],{cwd:resolve(root,"api"),env,stdio:["ignore","ignore","pipe"]});
+ child=spawn(process.execPath,[apiDist+"/server.js"],{cwd:resolve(root,"api"),env,stdio:["ignore","ignore","pipe"]});
  child.stderr.on("data",chunk=>stderr+=chunk);
- for(let i=0;i<80;i++){if(child.exitCode!==null)throw Error("Isolated API failed to start: "+stderr.slice(-1500));try{if((await fetch(api+"/health")).ok)break;}catch{}await new Promise(done=>setTimeout(done,100));}
- const sync=()=>{invoke("indexer","dist/backfill.js",env);invoke("indexer","dist/project.js",env);invoke("api","dist/sync-business-publications.js",env);};
- const request=async(path,payload,token)=>{const response=await fetch(api+"/operator/v1"+path,{method:payload?"POST":"GET",headers:{...(payload?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{})},...(payload?{body:JSON.stringify(payload)}:{})});return {status:response.status,body:await response.json()};};
+ for(let i=0;i<80;i++){if(child.exitCode!==null)throw Error("Isolated API failed to start: "+stderr.slice(-1500));try{if((await testFetch(api+"/health")).ok)break;}catch{}await new Promise(done=>setTimeout(done,100));}
+ invoke("api","--test",env,["test/acceptance.test.mjs"]);
+ invoke("api","scripts/verify-write-journal-readiness.mjs",env);
+ const sync=()=>{invoke("indexer",indexerDist+"/backfill.js",env);invoke("indexer",indexerDist+"/project.js",env);invoke("api",apiDist+"/sync-business-publications.js",env);};
+ const request=async(path,payload,token)=>{const response=await testFetch(api+"/operator/v1"+path,{method:payload?"POST":"GET",headers:{...(payload?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{})},...(payload?{body:JSON.stringify(payload)}:{})});return {status:response.status,body:await response.json()};};
  const password="Synthetic-Only-Password-2026";
  const actors=[];
  for(const [name,type] of [["Test Producer","Producer"],["Test Distributor","Customs broker & inspection"],["Test Shop","Shop"],["Other Producer","Producer"]]){
@@ -65,7 +79,7 @@ try {
   return token;
  };
  const generic=async(tenantId,trackingId,path,body,token)=>{
-  const response=await fetch(`${api}/v1/tenants/${tenantId}/entities/${trackingId}/${path}`,{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json","Idempotency-Key":"integration-"+randomUUID()},body:JSON.stringify(body)});
+  const response=await testFetch(`${api}/v1/tenants/${tenantId}/entities/${trackingId}/${path}`,{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json","Idempotency-Key":"integration-"+randomUUID()},body:JSON.stringify(body)});
   return {status:response.status,body:await response.json()};
  };
  checks.push("Four independent businesses signed up, registered on chain and signed in without invitations.");
@@ -73,12 +87,12 @@ try {
   ...Array.from({length:5},(_,i)=>({label:"Quality note "+(i+1),value:"Bounded JSON field "+"x".repeat(900)}))];
  const creates=new Map();
  const create=async(actor,name,publish,details,description="TraceForge integration product data")=>{
-  const body={name,description,...(details?{fields:details}:{}),publish,idempotencyKey:randomUUID()};
+  const body={name,id:"TEST-"+randomUUID(),description,...(details?{fields:details}:{}),publish,idempotencyKey:randomUUID()};
   const result=await request("/products/create",body,actor.token);assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.status,"CONFIRMED");
   creates.set(result.body.trackingId,{body,result:result.body});sync();return result.body.trackingId;
  };
  const first=await create(producer,"Integration Bottle",true,fields),second=await create(other,"Other Producer Bottle",true,undefined,""),privateId=await create(other,"PRIVATE_PRODUCT_SENTINEL",false,[{label:"Private supplier note",value:"PRIVATE_FIELD_SENTINEL"}]);
- const invalidCreate={name:"Invalid details",description:"",publish:false,idempotencyKey:randomUUID()};
+ const invalidCreate={name:"Invalid details",id:"INVALID",description:"",publish:false,idempotencyKey:randomUUID()};
  const [documentsBefore]=await conn.query("SELECT COUNT(*) AS total FROM offchain_documents");
  for(const invalid of [[{label:"Batch",value:"1"},{label:" batch ",value:"2"}],[{label:" ",value:"1"}],[{label:"Batch",value:1}],[{label:"Batch",value:"1",hidden:true}],Array.from({length:33},(_,i)=>({label:"Field "+i,value:"1"}))])
   assert.equal((await request("/products/create",{...invalidCreate,fields:invalid},producer.token)).status,400);
@@ -116,13 +130,13 @@ try {
  const inventory=await request("/products",undefined,distributor.token);assert.equal(inventory.body.products.length,2);assert.ok(inventory.body.products.every(p=>p.holder.id===distributor.user.organizationId));
  const outsideWriteToken=await genericToken(distributor,other.user.tenantId);
  const closeSimulation=await generic(other.user.tenantId,second,"close/simulate",{eventType,evidenceHash},outsideWriteToken);
- assert.equal(closeSimulation.status,200,JSON.stringify(closeSimulation.body));assert.equal(closeSimulation.body.simulated,true);
+ assert.equal(closeSimulation.status,409,JSON.stringify(closeSimulation.body));assert.equal(closeSimulation.body.simulated,false);
  assert.equal(await read("isActiveTenantMember",[other.user.tenantId,distributor.user.organizationId]),false);
- checks.push("Generic production simulation makes no changes; generic Close simulation authorizes the current holder without producer membership or Shop role.");
+ checks.push("Generic production simulation makes no changes; registered singles require quantity-aware removal rather than generic close.");
  assert.equal((await request("/products/"+privateId+"/history",undefined,distributor.token)).status,404);
  const privateLookup=await request("/receive/"+privateId,undefined,distributor.token);assert.equal(privateLookup.body.name,null);assert.ok(!JSON.stringify(privateLookup).includes("PRIVATE_PRODUCT_SENTINEL"));
  checks.push("One business receives products from two independent producers; inventory spans workspaces while unrelated private metadata stays hidden.");
- const closeBody={reason:"Damaged",confirmed:true,idempotencyKey:randomUUID()};
+ const closeBody={reason:"Damaged",reasonText:"Broken during transit",version:"1",confirmed:true,idempotencyKey:randomUUID()};
  assert.equal((await request("/products/"+first+"/close",closeBody,producer.token)).status,409);
  const closed=await request("/products/"+first+"/close",closeBody,distributor.token);assert.equal(closed.status,200,JSON.stringify(closed.body));assert.equal(closed.body.status,"CONFIRMED");sync();
  assert.equal((await read("getEntity",[producer.user.tenantId,first])).closed,true);
@@ -139,28 +153,34 @@ try {
   assert.equal(rejected.status,409,JSON.stringify(rejected.body));assert.equal(rejected.body.simulated,false);
  }
  checks.push("All seven generic mutation simulations reject closed products; retired proposal/accept/cancel routes are absent.");
- const openApi=await (await fetch(api+"/openapi.json")).json();assert.ok(!Object.keys(openApi.paths).some(path=>/custody\/(propose|accept|cancel)/.test(path)));
+ const openApi=await (await testFetch(api+"/openapi.json")).json();assert.ok(!Object.keys(openApi.paths).some(path=>/custody\/(propose|accept|cancel)/.test(path)));
  assert.equal((await request("/products/"+first+"/receive",{version:"2",confirmed:true,idempotencyKey:randomUUID()},shop.token)).status,409);
  const history=await request("/products/"+first+"/history",undefined,distributor.token);assert.equal(history.status,200);assert.equal(history.body.events.filter(e=>e.name==="CustodyClaimed").length,1);assert.ok(history.body.events.every(e=>e.occurredAt!==null));
  checks.push("Distributor closes its current product without Shop role or production membership; non-holder close and receiving a closed product fail.");
- const publicRef=await fetch(api+"/public/v1/tracking/"+first);assert.equal(publicRef.status,200);const ref=await publicRef.json();
- const publicHistory=await (await fetch(api+`/public/v1/tenants/${ref.tenantId}/entities/${ref.entityId}/history`)).json();
+ const publicRef=await testFetch(api+"/public/v1/tracking/"+first);assert.equal(publicRef.status,200);const ref=await publicRef.json();
+ const publicHistory=await (await testFetch(api+`/public/v1/tenants/${ref.tenantId}/entities/${ref.entityId}/history`)).json();
  assert.equal(publicHistory.entity.productInfo.name,"Integration Bottle");assert.equal(publicHistory.entity.currentHolder.name,"Test Distributor");assert.ok(publicHistory.events.some(e=>e.eventName==="CustodyClaimed"&&e.occurredAt));
  assert.deepEqual(publicHistory.entity.productInfo.fields,fields);
- const secondRef=await (await fetch(api+"/public/v1/tracking/"+second)).json();
- const secondDetail=await (await fetch(api+`/public/v1/tenants/${secondRef.tenantId}/entities/${secondRef.entityId}`)).json();assert.equal(secondDetail.productInfo.description,null);
+ const secondRef=await (await testFetch(api+"/public/v1/tracking/"+second)).json();
+ const secondDetail=await (await testFetch(api+`/public/v1/tenants/${secondRef.tenantId}/entities/${secondRef.entityId}`)).json();assert.equal(secondDetail.productInfo.description,null);
  assert.ok(!JSON.stringify(publicHistory).includes("PRIVATE_FIELD_SENTINEL"));
  assert.ok(!JSON.stringify(privateLookup).includes("PRIVATE_FIELD_SENTINEL"));
  const [aliases]=await conn.query("SELECT short_code FROM public_entity_short_links WHERE tracking_id=UNHEX(SUBSTRING(?,3))",[first]);
  assert.equal((await request("/receive/"+aliases[0].short_code,undefined,shop.token)).body.trackingId,first);
- assert.equal((await fetch(api+"/public/v1/tracking/"+privateId)).status,404);
+ assert.equal((await testFetch(api+"/public/v1/tracking/"+privateId)).status,404);
  await conn.query("DELETE FROM public_entity_publications WHERE tenant_id=? AND entity_id=?",[producer.user.tenantId,first]);sync();
- assert.equal((await fetch(api+"/public/v1/tracking/"+first)).status,404);
+ assert.equal((await testFetch(api+"/public/v1/tracking/"+first)).status,404);
  assert.equal((await request("/receive/"+first,undefined,shop.token)).body.name,null,"Scan preview exposed an unpublished product name");
  checks.push("Public tracking keeps named holders, product details, dates and short IDs. Private products stay hidden, and sync respects explicit unpublishing.");
+ await batchChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,fetcher:testFetch});
+ invoke("api","scripts/test-operator-dashboard.mjs",env);
+ invoke("api","scripts/test-public-presentation.mjs",env);
+ invoke("api","scripts/test-public-discovery.mjs",env);
+ checks.push("Actual migration runners and legacy temporary-table dashboard/public-history integration checks pass on the upgraded schema.");
  const [journal]=await conn.query("SELECT COUNT(*) AS total,SUM(serialized_transaction IS NOT NULL) AS signed FROM chain_write_operations WHERE status='CONFIRMED'");assert.equal(Number(journal[0].signed),0);
+ const [journalAll]=await conn.query("SELECT COUNT(*) AS total,SUM(status='FAILED') AS failed FROM chain_write_operations");
  const [claims]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(claims[0].total),2);
- invoke("indexer","dist/project.js",env);const [again]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(again[0].total),2);
+ invoke("indexer",indexerDist+"/project.js",env);const [again]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(again[0].total),2);
  checks.push("Projector runs repeatedly without duplicate custody receipts; confirmed journals remove serialized transactions.");
  const pendingId=randomUUID();
  await conn.query(`INSERT INTO chain_write_operations
@@ -172,17 +192,17 @@ try {
  await conn.query("DELETE FROM chain_write_operations WHERE operation_id=?",[pendingId]);
  checks.push("An interrupted prepared write blocks a new transaction for the same business until the original operation is recovered.");
  await new Promise(done=>{child.once("exit",done);child.kill("SIGTERM");});
- child=spawn(process.execPath,["dist/server.js"],{cwd:resolve(root,"api"),env:{...env,TRACEFORGE_BROADCAST_ENABLED:"false"},stdio:"ignore"});
- for(let i=0;i<80;i++){if(child.exitCode!==null)throw Error("Disabled isolated API failed to start");try{if((await fetch(api+"/health")).ok)break;}catch{}await new Promise(done=>setTimeout(done,100));}
+ child=spawn(process.execPath,[apiDist+"/server.js"],{cwd:resolve(root,"api"),env:{...env,TRACEFORGE_BROADCAST_ENABLED:"false"},stdio:"ignore"});
+ for(let i=0;i<80;i++){if(child.exitCode!==null)throw Error("Disabled isolated API failed to start");try{if((await testFetch(api+"/health")).ok)break;}catch{}await new Promise(done=>setTimeout(done,100));}
  const disabled=await generic(other.user.tenantId,second,"close/broadcast",{eventType,evidenceHash,confirm:"BROADCAST"},outsideWriteToken);
  assert.equal(disabled.status,503);assert.equal(disabled.body.error.code,"broadcast_disabled");
  const disableLookup=await request("/receive/"+second,undefined,shop.token);
  assert.equal((await request("/products/"+second+"/receive",{version:disableLookup.body.version,confirmed:true,idempotencyKey:randomUUID()},shop.token)).status,503);
  assert.equal((await read("getEntity",[other.user.tenantId,second])).closed,false);
- const [disabledJournal]=await conn.query("SELECT COUNT(*) AS total FROM chain_write_operations");assert.equal(Number(disabledJournal[0].total),Number(journal[0].total));
+ const [disabledJournal]=await conn.query("SELECT COUNT(*) AS total FROM chain_write_operations");assert.equal(Number(disabledJournal[0].total),Number(journalAll[0].total));
  checks.push("Disabling broadcasts blocks both generic and operator writes without creating journal entries or changing chain state.");
- await writeFile(join(tmpdir(),"TraceForge-Direct-Claim-Integration-2026-10-05.json"),JSON.stringify({passed:true,checks,confirmedTransactions:Number(journal[0].total)},null,2));
- console.log(JSON.stringify({passed:true,checks,confirmedTransactions:Number(journal[0].total)},null,2));
+ await writeFile(join(tmpdir(),"TraceForge-Quantity-Integration-2026-10-06.json"),JSON.stringify({passed:true,checks,confirmedTransactions:Number(journal[0].total),failedConcurrentTransactions:Number(journalAll[0].failed)},null,2));
+ console.log(JSON.stringify({passed:true,checks,confirmedTransactions:Number(journal[0].total),failedConcurrentTransactions:Number(journalAll[0].failed)},null,2));
 } finally {
  child?.kill("SIGTERM");await conn?.end();
  await admin.query("DROP DATABASE IF EXISTS `"+database+"`");await admin.end();await rm(walletDir,{recursive:true,force:true});

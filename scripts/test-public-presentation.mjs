@@ -1,3 +1,4 @@
+const apiDist=process.env.TRACEFORGE_TEST_API_DIST??"dist";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import Fastify from "fastify";
@@ -6,10 +7,10 @@ import Fastify from "fastify";
 // Publication rows remain UNCOMMITTED and are rolled back on disconnect.
 // No live schema, entity, document, token or blockchain write is changed.
 process.env.TRACEFORGE_BROADCAST_ENABLED = "false";
-const { db } = await import("../dist/db.js");
-const { config } = await import("../dist/config.js");
-const { registerPublicDiscoveryRoutes } = await import("../dist/routes/public-discovery.js");
-const { savePublicPresentation } = await import("../dist/public-presentation.js");
+const { db } = await import("../"+apiDist+"/db.js");
+const { config } = await import("../"+apiDist+"/config.js");
+const { registerPublicDiscoveryRoutes } = await import("../"+apiDist+"/routes/public-discovery.js");
+const { savePublicPresentation } = await import("../"+apiDist+"/public-presentation.js");
 assert.equal(config.traceforge.broadcastEnabled, false);
 const connection = await db.getConnection();
 const query = async (sql, values = []) => (await connection.query(sql, values))[0];
@@ -26,7 +27,7 @@ const product = { name: "Demo Batch", description: null, fields: [{ label: "Unit
 const sentinel = "SYNTHETIC_PRIVATE_DOCUMENT";
 const app = Fastify({ logger: false });
 try {
-  for (const table of ["entities", "organizations", "tenant_memberships", "chain_events"]) {
+  for (const table of ["entities", "organizations", "tenant_memberships", "chain_events", "product_quantities"]) {
     const [schema] = await query(`SHOW CREATE TABLE ${table}`);
     await query(schema["Create Table"].replace(/^CREATE TABLE/, "CREATE TEMPORARY TABLE"));
   }
@@ -34,6 +35,7 @@ try {
   // tables need a second physical mirror for that alias in this isolated test.
   const [eventSchema] = await query("SHOW CREATE TABLE chain_events");
   await query(eventSchema["Create Table"].replace("`chain_events`","`presentation_test_companion_events`"));
+  await query(eventSchema["Create Table"].replace("`chain_events`","`presentation_test_registration_events`"));
   await query(readFileSync("migrations/006_public_entity_presentations.sql", "utf8").replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMPORARY TABLE"));
   await connection.beginTransaction();
   for (const id of [entity, linked]) {
@@ -50,7 +52,7 @@ try {
   const profile={ metadataHash:hash,productInfo:product,organizations:[producer,distributor] };
   await savePublicPresentation(connection,tenant,entity,profile);
   await savePublicPresentation(connection,tenant,entity,profile);
-  assert.equal((await query("SELECT COUNT(*) AS count FROM public_entity_presentations"))[0].count,1,"Sharing details must be idempotent");
+  assert.equal(Number((await query("SELECT COUNT(*) AS count FROM public_entity_presentations"))[0].count),1,"Sharing details must be idempotent");
   await assert.rejects(savePublicPresentation(connection,tenant,entity,{...profile,metadataHash:h("56")}),/reference has changed/);
   await assert.rejects(savePublicPresentation(connection,tenant,entity,{...profile,organizations:[{...producer,metadataHash:h("89")}]}),/Business reference/);
   await assert.rejects(savePublicPresentation(connection,h("ef"),entity,profile),/Publish the indexed product/);
@@ -76,8 +78,10 @@ try {
     if(sql.includes("FROM chain_events companion")){
       await query("DELETE FROM presentation_test_companion_events");
       await query("INSERT INTO presentation_test_companion_events SELECT * FROM chain_events");
+      await query("DELETE FROM presentation_test_registration_events");
+      await query("INSERT INTO presentation_test_registration_events SELECT * FROM chain_events");
     }
-    return connection.query(sql.replace("FROM chain_events companion","FROM presentation_test_companion_events companion"),args);
+    return connection.query(sql.replace("FROM chain_events companion","FROM presentation_test_companion_events companion").replace("FROM chain_events registration","FROM presentation_test_registration_events registration"),args);
   };
   await registerPublicDiscoveryRoutes(app, { db: { query: historyQuery },
     chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress });
@@ -130,7 +134,7 @@ try {
     cursor=result.page.nextAfterEventId;
   }
   assert.deepEqual(paged,expected,"Filtering must occur before LIMIT, including paired logs crossing a cursor boundary");
-  assert.equal((await query("SELECT COUNT(*) AS count FROM chain_events"))[0].count,kinds.length+fixtures.length,"Raw audit logs preserved");
+  assert.equal(Number((await query("SELECT COUNT(*) AS count FROM chain_events"))[0].count),kinds.length+fixtures.length,"Raw audit logs preserved");
   await query("UPDATE entities SET metadata_hash=? WHERE tenant_id=? AND entity_id=?",[h("56"),tenant,entity]);
   assert.equal((await app.inject(path)).json().productInfo,null,"Stale product details exposed");
   await query("UPDATE organizations SET metadata_hash=? WHERE organization_id=?",[h("89"),distributor.id]);
@@ -144,7 +148,7 @@ try {
   assert.equal((await app.inject(path+"/history")).statusCode,404);
   await assert.rejects(savePublicPresentation(connection,tenant,entity,profile),/Publish the indexed product/);
   await savePublicPresentation(connection,tenant,entity,null);
-  assert.equal((await query("SELECT COUNT(*) AS count FROM public_entity_presentations"))[0].count,0);
+  assert.equal(Number((await query("SELECT COUNT(*) AS count FROM public_entity_presentations"))[0].count),0);
   assert.deepEqual(await counts(),before,"Committed live data changed");
   console.log("Public presentation MySQL checks passed: all event dates, paired-log suppression with independent traces preserved, exact cursor boundaries, correct transfer attribution, public product/name snapshots, stale and cross-workspace suppression, exact pagination and publication revocation.");
 } finally {

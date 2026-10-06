@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createWalletClient, decodeEventLog, defineChain, encodeFunctionData, http, keccak256, zeroHash } from "viem";
 import type { Hex } from "viem";
 import type { RowDataPacket } from "mysql2/promise";
+import { businessReceiptMatches } from "./business-receipt.js";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { chainClient, contractAddress } from "./chain.js";
@@ -15,7 +16,7 @@ import type { WriteOperationRow } from "./write-journal.js";
 export class BusinessProblem extends Error {
   constructor(public code: string, public status = 409) { super(code); }
 }
-export type BusinessCall = "registerBusiness" | "createBusinessWorkspace" | "createEntity" | "claimCustody" | "closeEntity";
+export type BusinessCall = "registerBusiness" | "createBusinessWorkspace" | "createEntity" | "createProduct" | "claimCustody" | "claimBatch" | "removeProduct" | "closeEntity";
 export interface BusinessWrite {
   accountId: string; organizationId: string; tenantId: string; entityId: string;
   operation: BusinessCall; args: readonly unknown[]; idempotencyKey: string; expectedEvent: string;
@@ -97,17 +98,7 @@ export async function businessWrite(input: BusinessWrite) {
     const event = events.find(event => event.eventName === input.expectedEvent);
     if (!event) throw new BusinessProblem("receipt_unverified", 503);
     const args = event.args as unknown as Record<string, unknown>;
-    const same = (a: unknown, b: unknown) => String(a).toLowerCase() === String(b).toLowerCase();
-    if (input.operation === "registerBusiness") {
-      if (!same(args.organizationId, input.organizationId)) throw new BusinessProblem("receipt_unverified", 503);
-    } else if (!same(args.tenantId, input.tenantId) || (input.operation !== "createBusinessWorkspace" && !same(args.entityId, input.entityId))) {
-      throw new BusinessProblem("receipt_unverified", 503);
-    }
-    if (input.operation === "claimCustody" && (!same(args.toOrganizationId, input.organizationId) ||
-      !same(args.actor, account.address) || !same(args.evidenceHash, input.args[4]) ||
-      BigInt(String(args.custodyVersion)) !== BigInt(String(input.args[2])) + 1n)) throw new BusinessProblem("receipt_unverified", 503);
-    if (input.operation === "closeEntity" && (!same(args.organizationId, input.organizationId) || !same(args.actor, account.address) ||
-      !same(args.eventType, input.args[3]) || !same(args.evidenceHash, input.args[4]))) throw new BusinessProblem("receipt_unverified", 503);
+    if(!businessReceiptMatches(input,args,account.address))throw new BusinessProblem("receipt_unverified",503);
     await markWriteOperationConfirmed(operation.operation_id, receipt.blockNumber.toString(), receipt.gasUsed.toString());
     return { ...safeResult(operation), status: "CONFIRMED", blockNumber: receipt.blockNumber.toString() };
   } finally {

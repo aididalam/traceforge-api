@@ -1,20 +1,23 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { RowDataPacket } from "mysql2/promise";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { keccak256, stringToHex, zeroHash } from "viem";
+import { encodeAbiParameters, keccak256, stringToHex, zeroHash } from "viem";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { readTraceForge } from "./chain.js";
 import { hashPassword, verifyPassword } from "./operator-credentials.js";
 import { BusinessProblem, businessWrite } from "./business-write.js";
-import { issuePublicShortLink, normalizeShortCode } from "./public-short-links.js";
+import { issueProductShortLink, normalizeShortCode } from "./public-short-links.js";
 import { savePublicPresentation } from "./public-presentation.js";
 import type { OperatorPrincipal } from "./operator-data.js";
-import { normalizeProductFields, readProductFields } from "./product-metadata.js";
+import { readProductFields } from "./product-metadata.js";
 import type { ProductField } from "./product-metadata.js";
+import { productRegistration, productQuantity, removalInput, removalReasons } from "./product-input.js";
+import { reserveBusinessCode } from "./business-codes.js";
+import { quantitySummary, productRoutes } from "./product-quantity.js";
 
 const id = () => "0x" + randomBytes(32).toString("hex");
 const hash = (value: string) => keccak256(stringToHex(value));
@@ -41,12 +44,14 @@ async function document(kind: string, value: unknown) {
   return contentHash;
 }
 
-export interface SignupInput { email: string; password: string; name: string; businessName: string; businessType: string; publicProfile: boolean }
+export interface SignupInput { email: string; password: string; name: string; businessName: string; businessType: string; publicProfile: boolean; businessCode?:string }
 export async function signupBusiness(input: SignupInput) {
   if (!config.traceforge.broadcastEnabled) throw new BusinessProblem("signup_unavailable", 503);
   const email = input.email.trim().toLowerCase();
   const conn = await db.getConnection();
   let account: RowDataPacket;
+  let businessCode:string;
+  let newKey:string|undefined,newKeyPath:string|undefined,createdKeyFile:string|undefined;
   try {
     await conn.beginTransaction();
     const [existing] = await conn.query<RowDataPacket[]>(`SELECT a.*,b.production_role_id,b.business_name,b.business_type,b.public_profile
@@ -61,7 +66,7 @@ export async function signupBusiness(input: SignupInput) {
       if ((await stat(path)).mode & 0o077) throw new BusinessProblem("signup_unavailable", 503);
       const key = generatePrivateKey(), wallet = privateKeyToAccount(key), organizationId = id(), tenantId = id(), roleId = id();
       // Never return or log this key; the browser has only its opaque session cookie.
-      await writeFile(resolve(path, organizationId + ".key"), key + "\n", { flag: "wx", mode: 0o600 });
+      newKey=key;newKeyPath=resolve(path,organizationId+".key");
       const accountId = randomUUID(), passwordDigest = await hashPassword(input.password);
       await conn.query(`INSERT INTO business_wallets
         (organization_id,wallet_address,tenant_id,production_role_id,business_name,business_type,public_profile) VALUES (?,?,?,?,?,?,?)`,
@@ -72,19 +77,22 @@ export async function signupBusiness(input: SignupInput) {
       account = { account_id:accountId,tenant_id:tenantId,organization_id:organizationId,production_role_id:roleId,
         business_name:input.businessName.trim(),business_type:input.businessType.trim(),public_profile:input.publicProfile } as RowDataPacket;
     }
+    try{businessCode=await reserveBusinessCode(conn,account.organization_id,input.businessCode);}
+    catch(error){if(error instanceof Error&&/business code/i.test(error.message))throw new BusinessProblem("invalid_request",400);throw error;}
+    if(newKey&&newKeyPath){await writeFile(newKeyPath,newKey+"\n",{flag:"wx",mode:0o600});createdKeyFile=newKeyPath;}
     await conn.commit();
-  } catch (error) { await conn.rollback(); throw error; } finally { conn.release(); }
+  } catch (error) { await conn.rollback();if(createdKeyFile)await rm(createdKeyFile,{force:true});throw error; } finally { conn.release(); }
   const metadata = await document("organization", { name:account.business_name,organizationType:account.business_type });
   const workspaceMetadata = await document("tenant", { name:account.business_name });
   const base = { accountId:account.account_id,organizationId:account.organization_id,tenantId:account.tenant_id,entityId:zeroHash };
   const registered = await businessWrite({ ...base,operation:"registerBusiness",args:[account.organization_id,metadata],
     idempotencyKey:"signup-register",expectedEvent:"OrganizationRegistered" });
-  if (registered.status !== "CONFIRMED") return { created:false,pending:true };
+  if (registered.status !== "CONFIRMED") return { created:false,pending:true,businessCode };
   const workspace = await businessWrite({ ...base,operation:"createBusinessWorkspace",args:[account.tenant_id,workspaceMetadata,account.production_role_id],
     idempotencyKey:"signup-workspace",expectedEvent:"TenantCreated" });
-  if (workspace.status !== "CONFIRMED") return { created:false,pending:true };
+  if (workspace.status !== "CONFIRMED") return { created:false,pending:true,businessCode };
   await db.query("UPDATE operator_accounts SET active=TRUE WHERE account_id=?", [account.account_id]);
-  return { created:true,pending:false };
+  return { created:true,pending:false,businessCode };
 }
 
 async function productReference(tracking: string) {
@@ -96,8 +104,10 @@ async function productReference(tracking: string) {
     trackingId = aliases[0].tracking_id;
   }
   if (!/^0x[0-9a-f]{64}$/.test(trackingId)) throw new BusinessProblem("invalid_request", 400);
-  const [rows] = await db.query<RowDataPacket[]>(`SELECT tracking_id,tenant_id,entity_id,creator_organization_id,public_details,publication_initialized
-    FROM business_product_records WHERE tracking_id=?`, [trackingId]);
+  const [rows] = await db.query<RowDataPacket[]>(`SELECT tracking_id,tenant_id,entity_id,creator_organization_id,public_details,publication_initialized,
+    initial_quantity,external_id,registration_metadata_hash FROM business_product_records WHERE tracking_id=?
+    AND (confirmed=TRUE OR initial_quantity IS NULL) AND (chain_id IS NULL OR (chain_id=? AND contract_address=?))`,
+    [trackingId,config.traceforge.chainId,config.traceforge.contractAddress.toLowerCase()]);
   if (!rows[0]) throw new BusinessProblem("product_not_found", 404);
   return rows[0];
 }
@@ -115,8 +125,10 @@ export async function syncPublicDetails(reference: RowDataPacket) {
     FROM business_wallets b JOIN organizations o ON o.organization_id=b.organization_id
     WHERE b.public_profile=TRUE AND (b.organization_id=? OR b.organization_id IN
       (SELECT from_organization_id FROM custody_claims WHERE tenant_id=? AND entity_id=?) OR b.organization_id IN
-      (SELECT to_organization_id FROM custody_claims WHERE tenant_id=? AND entity_id=?)) LIMIT 32`,
-    [reference.creator_organization_id,reference.tenant_id,reference.entity_id,reference.tenant_id,reference.entity_id]);
+      (SELECT to_organization_id FROM custody_claims WHERE tenant_id=? AND entity_id=?) OR b.organization_id IN
+      (SELECT organization_id FROM batch_routes WHERE chain_id=? AND contract_address=? AND tenant_id=? AND entity_id=?)) ORDER BY b.organization_id LIMIT 32`,
+    [reference.creator_organization_id,reference.tenant_id,reference.entity_id,reference.tenant_id,reference.entity_id,
+      config.traceforge.chainId,config.traceforge.contractAddress.toLowerCase(),reference.tenant_id,reference.entity_id]);
   const doc = typeof products[0].document_json === "string" ? JSON.parse(products[0].document_json) : products[0].document_json;
   await db.query("INSERT IGNORE INTO public_entity_publications (tenant_id,entity_id) VALUES (?,?)", [reference.tenant_id,reference.entity_id]);
   await db.query("INSERT IGNORE INTO public_entity_tracking_ids (tracking_id,tenant_id,entity_id) VALUES (UNHEX(SUBSTRING(?,3)),?,?)",
@@ -124,14 +136,15 @@ export async function syncPublicDetails(reference: RowDataPacket) {
   await savePublicPresentation(db,reference.tenant_id,reference.entity_id,{ metadataHash:products[0].metadata_hash,
     productInfo:{name:doc.name,description:doc.description?.trim()||null,fields:readProductFields(doc.fields)},
     organizations:rows.map(row=>({id:row.organization_id,metadataHash:row.metadata_hash,name:row.business_name,type:row.business_type})) });
-  await issuePublicShortLink(db,reference.tracking_id);
+  // Codes already exist for confirmed registrations, including private ones.
   await db.query("UPDATE business_product_records SET publication_initialized=TRUE WHERE tracking_id=?",[reference.tracking_id]);
 }
 
 export async function receiveLookup(principal: OperatorPrincipal, tracking: string) {
   const ref = await productReference(tracking);
-  const [entity, version] = await Promise.all([readTraceForge("getEntity",[ref.tenant_id,ref.entity_id]),
-    readTraceForge("getCustodyVersion",[ref.tenant_id,ref.entity_id])]);
+  const entity=await readTraceForge("getEntity",[ref.tenant_id,ref.entity_id]);
+  const isBatch=ref.initial_quantity!=null&&BigInt(ref.initial_quantity)>1n;
+  const version=isBatch?null:await readTraceForge("getCustodyVersion",[ref.tenant_id,ref.entity_id]);
   // A scan can reveal the public label, state and holder. Private product documents remain private.
   await syncPublicDetails(ref);
   const [names] = await db.query<RowDataPacket[]>(`SELECT p.product_info,o.business_name,o.public_profile
@@ -140,52 +153,84 @@ export async function receiveLookup(principal: OperatorPrincipal, tracking: stri
     LEFT JOIN business_wallets o ON o.organization_id=? WHERE r.tracking_id=?`, [entity.metadataHash,entity.currentCustodian,ref.tracking_id]);
   const info = names[0]?.product_info;
   const product = typeof info === "string" ? JSON.parse(info) : info;
-  return { trackingId:ref.tracking_id,name:product?.name??null,holder:{id:entity.currentCustodian,
-    name:names[0]?.public_profile?names[0].business_name:null},closed:Boolean(entity.closed),version:String(version),
-    canReceive:!entity.closed && entity.currentCustodian.toLowerCase()!==principal.organizationId };
+  const summary=await quantitySummary(db,[config.traceforge.chainId,config.traceforge.contractAddress.toLowerCase()],ref.tenant_id,ref.entity_id,principal.organizationId,Boolean(product));
+  if(isBatch&&!summary)throw new BusinessProblem("business_not_ready",503);
+  const routes=isBatch?await productRoutes(db,[config.traceforge.chainId,config.traceforge.contractAddress.toLowerCase()],ref.tenant_id,ref.entity_id,"0",50):null;
+  return { trackingId:ref.tracking_id,name:product?.name??null,holder:isBatch?null:{id:entity.currentCustodian,
+    name:names[0]?.public_profile?names[0].business_name:null},closed:Boolean(entity.closed),version:version===null?null:String(version),
+    canReceive:!entity.closed && (isBatch?BigInt(summary!.availableQuantity)>BigInt(summary!.ownAvailableQuantity??"0"):entity.currentCustodian.toLowerCase()!==principal.organizationId),
+    ...(summary?{quantity:summary}:{}),...(routes?{routes:routes.routes,page:routes.page}:{}) };
 }
 
-export interface CreateInput { name:string; description:string; fields?:ProductField[]; publish:boolean; idempotencyKey:string }
+export interface CreateInput { name:string; id:string; quantity?:number; description?:string; fields?:ProductField[]; publish:boolean; idempotencyKey:string }
 export async function createBusinessProduct(principal: OperatorPrincipal, input: CreateInput) {
-  let fields: ProductField[];
-  try { fields = normalizeProductFields(input.fields); }
+  let registration:ReturnType<typeof productRegistration>;
+  try { registration=productRegistration(input); }
   catch { throw new BusinessProblem("invalid_request", 400); }
   await semantics();
   const [wallets] = await db.query<RowDataPacket[]>("SELECT tenant_id,production_role_id FROM business_wallets WHERE organization_id=?", [principal.organizationId]);
   if (!wallets[0]) throw new BusinessProblem("business_not_ready", 503);
-  const tenantId = wallets[0].tenant_id, metadataHash = await document("entity",{
-    name:input.name.trim(),description:input.description.trim(),...(fields.length?{fields}:{}) });
+  const tenantId = wallets[0].tenant_id, metadataHash = await document("entity",registration);
   // A deterministic identity for this actor/request makes retries create the same product.
-  const trackingId = hash(principal.organizationId + ":" + input.idempotencyKey), entityId = trackingId;
-  await db.query(`INSERT IGNORE INTO business_product_records (tracking_id,tenant_id,entity_id,creator_organization_id,public_details)
-    VALUES (?,?,?,?,?)`, [trackingId,tenantId,entityId,principal.organizationId,input.publish]);
+  const trackingId = hash(`CREATE_PRODUCT_V2:${config.traceforge.chainId}:${config.traceforge.contractAddress.toLowerCase()}:${principal.organizationId}:${input.idempotencyKey}`), entityId = trackingId;
+  await db.query(`INSERT IGNORE INTO business_product_records (tracking_id,tenant_id,entity_id,creator_organization_id,public_details,
+    chain_id,contract_address,registration_metadata_hash,external_id,initial_quantity) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [trackingId,tenantId,entityId,principal.organizationId,input.publish,config.traceforge.chainId,config.traceforge.contractAddress.toLowerCase(),metadataHash,registration.id,registration.quantity]);
   const [refs] = await db.query<RowDataPacket[]>("SELECT * FROM business_product_records WHERE tracking_id=?", [trackingId]);
-  if (Boolean(refs[0].public_details)!==input.publish) throw new BusinessProblem("request_conflict");
+  if (Boolean(refs[0].public_details)!==input.publish||refs[0].registration_metadata_hash!==metadataHash) throw new BusinessProblem("request_conflict");
   const result = await businessWrite({ accountId:principal.accountId,organizationId:principal.organizationId,tenantId,entityId,
-    operation:"createEntity",args:[tenantId,wallets[0].production_role_id,entityId,event("PRODUCT"),metadataHash,event("PRODUCED")],
-    idempotencyKey:input.idempotencyKey,expectedEvent:"EntityCreated" });
-  await syncPublicDetails(refs[0]);
-  return { ...result,trackingId };
+    operation:"createProduct",args:[tenantId,wallets[0].production_role_id,entityId,metadataHash,BigInt(registration.quantity)],
+    idempotencyKey:input.idempotencyKey,expectedEvent:"ProductRegistered" });
+  let shortCode:string|null=null;
+  if(result.status==="CONFIRMED"){
+    await db.query("UPDATE business_product_records SET confirmed=TRUE WHERE tracking_id=?",[trackingId]);
+    await db.query("INSERT IGNORE INTO public_entity_tracking_ids(tracking_id,tenant_id,entity_id) VALUES(UNHEX(SUBSTRING(?,3)),?,?)",[trackingId,tenantId,entityId]);
+    shortCode=await issueProductShortLink(db,trackingId);
+    await syncPublicDetails(refs[0]);
+  }
+  return { ...result,trackingId,shortCode };
 }
+export interface ReceiveInput {version:string;confirmed:boolean;idempotencyKey:string;sourceRouteId?:string;quantity?:number}
 export async function receiveBusinessProduct(principal: OperatorPrincipal, tracking: string,
-  input:{version:string;confirmed:boolean;idempotencyKey:string}) {
+  input:ReceiveInput) {
   if (!input.confirmed) throw new BusinessProblem("receipt_confirmation_required", 400);
-  const ref=await productReference(tracking), evidence=await document("evidence",{
-    action:"PHYSICAL_RECEIPT",organizationId:principal.organizationId,trackingId:ref.tracking_id,version:input.version,confirmed:true });
+  const ref=await productReference(tracking),isBatch=ref.initial_quantity!=null&&BigInt(ref.initial_quantity)>1n;
+  let quantity:number;
+  try{quantity=productQuantity(input.quantity);if(isBatch&&(!input.sourceRouteId||input.quantity===undefined)||!isBatch&&(quantity!==1||input.sourceRouteId))throw new Error("Invalid receipt.");}
+  catch{throw new BusinessProblem("invalid_request",400);}
+  const source=input.sourceRouteId?.toLowerCase();
+  const routeId=isBatch?keccak256(encodeAbiParameters(
+    [{type:"bytes32"},{type:"uint256"},{type:"address"},{type:"bytes32"},{type:"bytes32"},{type:"bytes32"},{type:"bytes32"},{type:"bytes32"}],
+    [hash("TRACEFORGE_RECEIPT_ROUTE_V1"),BigInt(config.traceforge.chainId),config.traceforge.contractAddress as `0x${string}`,
+      ref.tenant_id,ref.entity_id,source as `0x${string}`,principal.organizationId as `0x${string}`,hash(input.idempotencyKey)])):null;
+  const evidence=await document("evidence",{
+    action:"PHYSICAL_RECEIPT",organizationId:principal.organizationId,trackingId:ref.tracking_id,version:input.version,quantity,
+    ...(isBatch?{sourceRouteId:source,receivedRouteId:routeId}:{}),confirmed:true });
   const result=await businessWrite({accountId:principal.accountId,organizationId:principal.organizationId,tenantId:ref.tenant_id,entityId:ref.entity_id,
-    operation:"claimCustody",args:[ref.tenant_id,ref.entity_id,BigInt(input.version),event("PRODUCT_RECEIVED"),evidence],
-    idempotencyKey:input.idempotencyKey,expectedEvent:"CustodyClaimed"});
+    operation:isBatch?"claimBatch":"claimCustody",args:isBatch?[ref.tenant_id,ref.entity_id,source,routeId,BigInt(input.version),BigInt(quantity),evidence]:
+      [ref.tenant_id,ref.entity_id,BigInt(input.version),event("PRODUCT_RECEIVED"),evidence],
+    idempotencyKey:input.idempotencyKey,expectedEvent:isBatch?"BatchReceived":"CustodyClaimed"});
   await syncPublicDetails(ref);
-  return {...result,trackingId:ref.tracking_id};
+  return {...result,trackingId:ref.tracking_id,...(isBatch?{receivedRouteId:routeId,quantity:String(quantity)}:{})};
 }
+export interface RemoveInput {reason?:typeof removalReasons[number];reasonText?:string;confirmed:boolean;idempotencyKey:string;routeId?:string;quantity?:number;version?:string}
 export async function closeBusinessProduct(principal:OperatorPrincipal,tracking:string,
-  input:{reason:"Sold"|"Lost"|"Damaged"|"Disposed";confirmed:boolean;idempotencyKey:string}) {
+  input:RemoveInput) {
   if (!input.confirmed) throw new BusinessProblem("close_confirmation_required",400);
-  const ref=await productReference(tracking), evidence=await document("evidence",{
-    action:"CLOSE",reason:input.reason,organizationId:principal.organizationId,trackingId:ref.tracking_id });
+  const ref=await productReference(tracking);
+  const registered=ref.initial_quantity!=null,isBatch=registered&&BigInt(ref.initial_quantity)>1n;
+  let normalized:ReturnType<typeof removalInput>,quantity:number;
+  try{normalized=registered?removalInput(input):{reason:input.reason??"Sold",reasonText:input.reasonText??""};quantity=productQuantity(input.quantity);
+    if(registered&&!input.version||isBatch&&(!input.routeId||input.quantity===undefined)||!isBatch&&(quantity!==1||input.routeId&&input.routeId!==zeroHash))throw new Error("Invalid removal.");}
+  catch{throw new BusinessProblem("invalid_request",400);}
+  const routeId=isBatch?input.routeId!.toLowerCase():zeroHash;
+  const evidence=await document("evidence",{
+    action:"REMOVE",...normalized,organizationId:principal.organizationId,trackingId:ref.tracking_id,quantity,
+    ...(registered?{routeId,version:input.version}:{}),confirmed:true });
   const result=await businessWrite({accountId:principal.accountId,organizationId:principal.organizationId,tenantId:ref.tenant_id,entityId:ref.entity_id,
-    operation:"closeEntity",args:[ref.tenant_id,zeroHash,ref.entity_id,event("PRODUCT_CLOSED_"+input.reason.toUpperCase()),evidence],
-    idempotencyKey:input.idempotencyKey,expectedEvent:"EntityClosed"});
-  return {...result,trackingId:ref.tracking_id};
+    operation:registered?"removeProduct":"closeEntity",args:registered?[ref.tenant_id,ref.entity_id,routeId,BigInt(quantity),BigInt(input.version!),
+      removalReasons.indexOf(normalized.reason),normalized.reasonText,evidence]:[ref.tenant_id,zeroHash,ref.entity_id,event("PRODUCT_CLOSED_"+normalized.reason.toUpperCase()),evidence],
+    idempotencyKey:input.idempotencyKey,expectedEvent:registered?"QuantityRemoved":"EntityClosed"});
+  return {...result,trackingId:ref.tracking_id,removedQuantity:String(quantity),...normalized};
 }
 export const businessActions={signup:signupBusiness,create:createBusinessProduct,lookup:receiveLookup,receive:receiveBusinessProduct,close:closeBusinessProduct};

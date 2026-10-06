@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 const base=process.env.API_BASE_URL??'http://127.0.0.1:3000';
 test('business inventory and writes require a session',async()=>{
  for(const path of ['/operator/v1/products','/operator/v1/me','/operator/v1/operations'])assert.equal((await fetch(base+path)).status,401);
- const result=await fetch(base+'/operator/v1/products/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Synthetic product',description:'',publish:false,idempotencyKey:'synthetic-request'})});
+ const result=await fetch(base+'/operator/v1/products/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Synthetic product',id:'SYNTHETIC-1',description:'',publish:false,idempotencyKey:'synthetic-request'})});
  assert.equal(result.status,401);
 });
 test('OpenAPI advertises direct receipt and independent signup',async()=>{

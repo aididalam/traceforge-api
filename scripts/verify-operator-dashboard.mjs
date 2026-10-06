@@ -1,3 +1,4 @@
+import {loadSourceFile} from "./test-source-loader.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
@@ -10,9 +11,9 @@ const {credential,digest,hashPassword}=await import(credentialsUrl);
 const presentationUrl=moduleUrl(readFileSync("src/public-presentation.ts","utf8"));
 const metadataUrl=moduleUrl(readFileSync("src/product-metadata.ts","utf8"));
 const historyUrl=moduleUrl(readFileSync("src/product-history.ts","utf8"));
-const dataText=readFileSync("src/operator-data.ts","utf8"),dataUrl=moduleUrl(dataText.replace('"./public-presentation.js"',JSON.stringify(presentationUrl)).replace('"./product-metadata.js"',JSON.stringify(metadataUrl)).replace('"./product-history.js"',JSON.stringify(historyUrl)));
+const dataText=readFileSync("src/operator-data.ts","utf8");
 const routeText=readFileSync("src/routes/operator.ts","utf8");
-const {registerOperatorRoutes}=await import(moduleUrl(routeText.replace('"../operator-credentials.js"',JSON.stringify(credentialsUrl)).replace('"../operator-data.js"',JSON.stringify(dataUrl)).replace('"../product-metadata.js"',JSON.stringify(metadataUrl))));
+const {registerOperatorRoutes}=await loadSourceFile("src/routes/operator.ts");
 const serverText=readFileSync("src/server.ts","utf8");
 assert.match(serverText,/registerOperatorRoutes\(app/);assert.match(serverText,/!routePath.startsWith\("\/operator\/"\)/);
 assert.doesNotMatch(routeText+dataText,/sendRawTransaction|writeContract|signTransaction|serialized_transaction|request_json|SELECT\s+\*/);

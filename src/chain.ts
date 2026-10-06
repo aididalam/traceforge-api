@@ -38,7 +38,10 @@ export async function readTraceForge(
     | "hasCapability"
     | "entityExists"
     | "getEntity"
-    | "getCustodyVersion",
+    | "getCustodyVersion"
+    | "getProduct"
+    | "getBatchRoute"
+    | "getRemovalTotal",
   args: readonly unknown[],
 ): Promise<any> {
   return chainClient.readContract({

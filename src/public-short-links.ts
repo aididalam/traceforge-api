@@ -55,3 +55,24 @@ export async function issuePublicShortLink(
   }
   throw new Error("Could not reserve a unique short code; retry later.");
 }
+
+// Business registration aliases are issued after a verified receipt, including
+// private products. Public resolution still joins the publication gate.
+export async function issueProductShortLink(db:Pick<Pool,"query">,value:string,generate= newPublicShortCode):Promise<string>{
+ if(!bytes32.test(value))throw new Error("Invalid tracking ID.");
+ const trackingId=value.toLowerCase();
+ for(let attempt=0;attempt<8;attempt++){
+  const [existing]=await db.query<ShortRow[]>(`SELECT s.short_code FROM public_entity_short_links s
+   JOIN business_product_records r ON r.tracking_id=CONCAT('0x',LOWER(HEX(s.tracking_id)))
+   WHERE r.tracking_id=? AND r.confirmed=TRUE`,[trackingId]);
+  if(existing[0])return existing[0].short_code;
+  const code=generate();if(normalizeShortCode(code)!==code)throw new Error("Invalid short code generator.");
+  try{
+   const [result]=await db.query<ResultSetHeader>(`INSERT INTO public_entity_short_links(short_code,tracking_id)
+    SELECT ?,UNHEX(SUBSTRING(tracking_id,3)) FROM business_product_records WHERE tracking_id=? AND confirmed=TRUE`,[code,trackingId]);
+   if(result.affectedRows!==1)throw new Error("Product must be confirmed before shortening.");
+   return code;
+  }catch(error){if((error as {code?:string}).code!=="ER_DUP_ENTRY")throw error;}
+ }
+ throw new Error("Short code allocation is busy; retry.");
+}
