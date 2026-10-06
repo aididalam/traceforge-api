@@ -19,10 +19,12 @@ Apply indexer migrations first. Business writes require `TRACEFORGE_BROADCAST_EN
 
 ## Product ID and batch API (Phase 3)
 
-The quantity upgrade is implemented and tested against a disposable deployment.
-Activation on Pi follows the UI and deployment phases; the existing local API/UI
-continue to use the older deployment. Apply indexer migration 006 and API
-migration 010 before starting this API build on the upgraded deployment.
+The quantity upgrade is implemented, tested and activated on Pi. The local API
+uses contract `0xf286a8f7bbbe4e5f2337e1701524368794de5672` and the fresh
+`traceforge_batch_20261006` database. Indexer migrations 001–006 and API
+migrations 001–010 are applied. See the parent's
+[Phase 6 activation](https://github.com/aididalam/traceforge/blob/main/docs/batch-activation-phase6.md).
+For a new environment, apply indexer migration 006 before API migration 010.
 
 - Signup accepts a descriptive `businessType` and optional available `businessCode`.
   Automatic codes use A–Z and 0–9, starting at one character and increasing as
@@ -129,6 +131,16 @@ tokens, signer keys or database passwords. See
 [Phase 5 verification](https://github.com/aididalam/traceforge/blob/main/docs/batch-integration-phase5.md).
 
 `npm run test:acceptance` checks a running API without writing. `npm run verify:mysql-backup-restore` exercises database backup/restore separately. Synthetic generic provenance fixtures retain schema/secret-boundary coverage without referring to retired chain deployments.
+
+`npm run verify:live-batch` performs read-only comparisons of the checked-in Pi
+demo receipt with contract balances/reasons, MySQL projections, short links,
+publication boundaries and confirmed journals. It expects the unchanged demo
+stock; manually receiving/removing demo products changes those expectations.
+`npm run demo:batch -- --broadcast` explicitly seeds an unseeded deployment;
+it refuses to repeat the recorded demo on the current contract. It reads demo
+credentials from the owner-only `~/.traceforge/secrets/batch-demo-accounts.json`
+(override with `TRACEFORGE_DEMO_ACCOUNTS_FILE`) and saves nonsecret demo identifiers
+and receipt proofs in the contracts submodule. Keys/passwords remain outside Git.
 
 For development verification while the legacy services continue running, compile
 both API and indexer with `tsc --outDir dist-phase3`, then run:

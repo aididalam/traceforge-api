@@ -41,6 +41,8 @@
     "verify:operator-dashboard": "node scripts/verify-operator-dashboard.mjs",
     "test:operator-dashboard": "node scripts/test-operator-dashboard.mjs",
     "test:direct-claim": "node scripts/test-direct-claim-integration.mjs",
+    "demo:batch": "node scripts/exercise-live-batch.mjs",
+    "verify:live-batch": "node scripts/verify-live-batch.mjs",
     "business:codes:backfill": "tsx src/backfill-business-codes.ts",
     "verify:public-products": "node scripts/verify-public-products.mjs",
     "verify:product-input": "node scripts/verify-product-input.mjs",
