@@ -6,6 +6,11 @@ export const traceForgeWriteAbi = [
     "type": "constructor"
   },
   {
+    "inputs": [],
+    "name": "BatchOperationRequired",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "bytes32",
@@ -149,6 +154,22 @@ export const traceForgeWriteAbi = [
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint64",
+        "name": "requested",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "available",
+        "type": "uint64"
+      }
+    ],
+    "name": "InsufficientQuantity",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "InvalidCustodyRecipient",
     "type": "error"
@@ -195,7 +216,22 @@ export const traceForgeWriteAbi = [
   },
   {
     "inputs": [],
+    "name": "InvalidQuantity",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidRemovalReasonText",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidRoleId",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidRouteId",
     "type": "error"
   },
   {
@@ -235,6 +271,11 @@ export const traceForgeWriteAbi = [
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "NotBatchProduct",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "bytes32",
@@ -258,6 +299,22 @@ export const traceForgeWriteAbi = [
       }
     ],
     "name": "NotCurrentCustodian",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "routeId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "organizationId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "NotRouteOwner",
     "type": "error"
   },
   {
@@ -387,6 +444,27 @@ export const traceForgeWriteAbi = [
       },
       {
         "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "ProductNotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ProductRemovalRequired",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
         "name": "roleId",
         "type": "bytes32"
       }
@@ -430,6 +508,28 @@ export const traceForgeWriteAbi = [
     "inputs": [
       {
         "internalType": "bytes32",
+        "name": "routeId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "RouteAlreadyExists",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "routeId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "RouteNotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
         "name": "entityId",
         "type": "bytes32"
       }
@@ -461,6 +561,27 @@ export const traceForgeWriteAbi = [
       }
     ],
     "name": "StaleCustody",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "routeId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint64",
+        "name": "expectedVersion",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "actualVersion",
+        "type": "uint64"
+      }
+    ],
+    "name": "StaleRoute",
     "type": "error"
   },
   {
@@ -570,6 +691,91 @@ export const traceForgeWriteAbi = [
     ],
     "name": "WalletNotBound",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "sourceRouteId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "receivedRouteId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "fromOrganizationId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "toOrganizationId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "actor",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "quantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "sourceAvailableQuantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "sourceForwardedQuantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "sourceVersion",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "evidenceHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "timestamp",
+        "type": "uint64"
+      }
+    ],
+    "name": "BatchReceived",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -1075,6 +1281,158 @@ export const traceForgeWriteAbi = [
       {
         "indexed": true,
         "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "rootRouteId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "organizationId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "actor",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "registrationMetadataHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "initialQuantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "timestamp",
+        "type": "uint64"
+      }
+    ],
+    "name": "ProductRegistered",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "routeId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "organizationId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "actor",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "quantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum TraceForge.RemovalReason",
+        "name": "reason",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "reasonText",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "routeAvailableQuantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "routeRemovedQuantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "version",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "availableQuantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "removedQuantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "evidenceHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "timestamp",
+        "type": "uint64"
+      }
+    ],
+    "name": "QuantityRemoved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
         "name": "roleId",
         "type": "bytes32"
       },
@@ -1363,6 +1721,19 @@ export const traceForgeWriteAbi = [
   },
   {
     "inputs": [],
+    "name": "MAX_PRODUCT_QUANTITY",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "acceptOwnership",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -1423,6 +1794,49 @@ export const traceForgeWriteAbi = [
       }
     ],
     "name": "bindWallet",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "sourceRouteId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "receivedRouteId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint64",
+        "name": "expectedVersion",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "quantity",
+        "type": "uint64"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "evidenceHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "claimBatch",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1525,6 +1939,30 @@ export const traceForgeWriteAbi = [
       }
     ],
     "stateMutability": "pure",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "computeRootRouteId",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -1651,6 +2089,39 @@ export const traceForgeWriteAbi = [
       },
       {
         "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "metadataHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint64",
+        "name": "quantity",
+        "type": "uint64"
+      }
+    ],
+    "name": "createProduct",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "roleId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
         "name": "metadataHash",
         "type": "bytes32"
       }
@@ -1736,6 +2207,82 @@ export const traceForgeWriteAbi = [
         "internalType": "bool",
         "name": "",
         "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "routeId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getBatchRoute",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "organizationId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "parentRouteId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "receivedQuantity",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "availableQuantity",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "forwardedQuantity",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "removedQuantity",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "version",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "createdAt",
+            "type": "uint64"
+          },
+          {
+            "internalType": "bool",
+            "name": "exists",
+            "type": "bool"
+          }
+        ],
+        "internalType": "struct TraceForge.BatchRoute",
+        "name": "",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
@@ -1984,6 +2531,96 @@ export const traceForgeWriteAbi = [
         "internalType": "struct TraceForge.RoleAssignment",
         "name": "",
         "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getProduct",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "registrationMetadataHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "originOrganizationId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "rootRouteId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "initialQuantity",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "availableQuantity",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "removedQuantity",
+            "type": "uint64"
+          },
+          {
+            "internalType": "bool",
+            "name": "exists",
+            "type": "bool"
+          }
+        ],
+        "internalType": "struct TraceForge.Product",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "enum TraceForge.RemovalReason",
+        "name": "reason",
+        "type": "uint8"
+      }
+    ],
+    "name": "getRemovalTotal",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
       }
     ],
     "stateMutability": "view",
@@ -2350,6 +2987,54 @@ export const traceForgeWriteAbi = [
       }
     ],
     "name": "registerOrganization",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "routeId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint64",
+        "name": "quantity",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "expectedVersion",
+        "type": "uint64"
+      },
+      {
+        "internalType": "enum TraceForge.RemovalReason",
+        "name": "reason",
+        "type": "uint8"
+      },
+      {
+        "internalType": "string",
+        "name": "reasonText",
+        "type": "string"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "evidenceHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "removeProduct",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

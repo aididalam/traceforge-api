@@ -50,6 +50,13 @@ empty array keeps compatibility with existing name/description-only products.
 Legacy Units/Packaging/Quality/Revision fields remain readable. Dynamic values
 are displayed as plain text, preserving their capitalization and contents.
 
+The generated contract ABI includes the 2026-10-06 quantity/route operations.
+The [batch upgrade](https://github.com/aididalam/traceforge/blob/main/docs/batch-quantity-plan.md)
+is being delivered in phases: contract accounting is implemented, while required
+external-ID validation, quantity HTTP workflows, route/search responses and DB
+migrations are the next phase. These HTTP endpoints still use the existing
+whole-product flow until that implementation and deployment are complete.
+
 Operator and public product histories show one business action per receive or
 removal. The contract emits a matching TraceRecorded log immediately after the
 action event. A shared SQL predicate excludes only that exact companion before
