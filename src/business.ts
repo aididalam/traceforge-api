@@ -95,7 +95,7 @@ export async function signupBusiness(input: SignupInput) {
   return { created:true,pending:false,businessCode };
 }
 
-async function productReference(tracking: string) {
+export async function productReference(tracking: string) {
   let trackingId = tracking.toLowerCase();
   if (normalizeShortCode(trackingId)) {
     const [aliases] = await db.query<RowDataPacket[]>(`SELECT CONCAT('0x',LOWER(HEX(tracking_id))) AS tracking_id
@@ -190,7 +190,8 @@ export async function createBusinessProduct(principal: OperatorPrincipal, input:
   }
   return { ...result,trackingId,shortCode };
 }
-export interface ReceiveInput {version:string;confirmed:boolean;idempotencyKey:string;sourceRouteId?:string;quantity?:number}
+export interface IntegrationEvidence {operationId:string;reference:string|null;occurredAt:string|null}
+export interface ReceiveInput {version:string;confirmed:boolean;idempotencyKey:string;sourceRouteId?:string;quantity?:number;integration?:IntegrationEvidence}
 export async function receiveBusinessProduct(principal: OperatorPrincipal, tracking: string,
   input:ReceiveInput) {
   if (!input.confirmed) throw new BusinessProblem("receipt_confirmation_required", 400);
@@ -205,7 +206,8 @@ export async function receiveBusinessProduct(principal: OperatorPrincipal, track
       ref.tenant_id,ref.entity_id,source as `0x${string}`,principal.organizationId as `0x${string}`,hash(input.idempotencyKey)])):null;
   const evidence=await document("evidence",{
     action:"PHYSICAL_RECEIPT",organizationId:principal.organizationId,trackingId:ref.tracking_id,version:input.version,quantity,
-    ...(isBatch?{sourceRouteId:source,receivedRouteId:routeId}:{}),confirmed:true });
+    ...(isBatch?{sourceRouteId:source,receivedRouteId:routeId}:{}),confirmed:true,
+    ...(input.integration?{integration:input.integration}:{}) });
   const result=await businessWrite({accountId:principal.accountId,organizationId:principal.organizationId,tenantId:ref.tenant_id,entityId:ref.entity_id,
     operation:isBatch?"claimBatch":"claimCustody",args:isBatch?[ref.tenant_id,ref.entity_id,source,routeId,BigInt(input.version),BigInt(quantity),evidence]:
       [ref.tenant_id,ref.entity_id,BigInt(input.version),event("PRODUCT_RECEIVED"),evidence],
@@ -213,7 +215,7 @@ export async function receiveBusinessProduct(principal: OperatorPrincipal, track
   await syncPublicDetails(ref);
   return {...result,trackingId:ref.tracking_id,...(isBatch?{receivedRouteId:routeId,quantity:String(quantity)}:{})};
 }
-export interface RemoveInput {reason?:typeof removalReasons[number];reasonText?:string;confirmed:boolean;idempotencyKey:string;routeId?:string;quantity?:number;version?:string}
+export interface RemoveInput {reason?:typeof removalReasons[number];reasonText?:string;confirmed:boolean;idempotencyKey:string;routeId?:string;quantity?:number;version?:string;integration?:IntegrationEvidence}
 export async function closeBusinessProduct(principal:OperatorPrincipal,tracking:string,
   input:RemoveInput) {
   if (!input.confirmed) throw new BusinessProblem("close_confirmation_required",400);
@@ -226,7 +228,8 @@ export async function closeBusinessProduct(principal:OperatorPrincipal,tracking:
   const routeId=isBatch?input.routeId!.toLowerCase():zeroHash;
   const evidence=await document("evidence",{
     action:"REMOVE",...normalized,organizationId:principal.organizationId,trackingId:ref.tracking_id,quantity,
-    ...(registered?{routeId,version:input.version}:{}),confirmed:true });
+    ...(registered?{routeId,version:input.version}:{}),confirmed:true,
+    ...(input.integration?{integration:input.integration}:{}) });
   const result=await businessWrite({accountId:principal.accountId,organizationId:principal.organizationId,tenantId:ref.tenant_id,entityId:ref.entity_id,
     operation:registered?"removeProduct":"closeEntity",args:registered?[ref.tenant_id,ref.entity_id,routeId,BigInt(quantity),BigInt(input.version!),
       removalReasons.indexOf(normalized.reason),normalized.reasonText,evidence]:[ref.tenant_id,zeroHash,ref.entity_id,event("PRODUCT_CLOSED_"+normalized.reason.toUpperCase()),evidence],

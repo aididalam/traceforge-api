@@ -19,7 +19,12 @@ try{
   }
  }
  const [rows]=await h.db.query("SELECT COUNT(*) count,SUM(status<>'CONFIRMED') pending,SUM(serialized_transaction IS NOT NULL) signed FROM chain_write_operations");
- assert.equal(Number(rows[0].count),report.confirmedTransactions);assert.equal(Number(rows[0].pending),0);assert.equal(Number(rows[0].signed),0);
+ // Later ERP/demo operations may add records. Verify the original receipt set
+ // directly, while still rejecting any unfinished or uncleared live write.
+ assert.ok(Number(rows[0].count)>=report.confirmedTransactions);assert.equal(Number(rows[0].pending),0);assert.equal(Number(rows[0].signed),0);
+ const hashes=report.transactions.map(t=>t.transactionHash);
+ const [original]=await h.db.query("SELECT status,serialized_transaction FROM chain_write_operations WHERE transaction_hash IN (?)",[hashes]);
+ assert.equal(original.length,hashes.length);assert.ok(original.every(r=>r.status==="CONFIRMED"&&r.serialized_transaction===null));
  const [scope]=await h.db.query("SELECT DISTINCT contract_address FROM chain_events");assert.deepEqual(scope.map(r=>r.contract_address),[h.address]);
  console.log(JSON.stringify({passed:true,contract:h.address,products:report.products.length,confirmedTransactions:report.confirmedTransactions,pending:0,signed:0},null,2));
 }finally{await h.db.end();}

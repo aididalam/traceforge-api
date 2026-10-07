@@ -1,6 +1,7 @@
 // A disposable MySQL database and local Hardhat chain. Never points at Pi.
 import {batchChecks} from "./batch-integration-checks.mjs";
 import {browserIntegrationChecks} from "./browser-integration-checks.mjs";
+import {erpIntegrationChecks} from "./erp-integration-checks.mjs";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
@@ -12,7 +13,9 @@ import dotenv from "dotenv";
 import { createPublicClient, createWalletClient, defineChain, http, keccak256, stringToHex } from "viem";
 
 const apiDist=process.env.TRACEFORGE_TEST_API_DIST??"dist",indexerDist=process.env.TRACEFORGE_TEST_INDEXER_DIST??"dist";
-const root=resolve(".."),rpc="http://127.0.0.1:18545",api="http://127.0.0.1:13301";
+const apiPort=Number(process.env.TRACEFORGE_TEST_API_PORT??13301);
+assert.ok(Number.isInteger(apiPort)&&apiPort>=13301&&apiPort<=13399,"Use an isolated loopback test port.");
+const root=resolve(".."),rpc="http://127.0.0.1:18545",api="http://127.0.0.1:"+apiPort;
 const local={...process.env,...dotenv.parse(await readFile(".env","utf8").catch(error=>{if(error.code!=="ENOENT")throw error;return "";}))};
 const database="traceforge_test_claim_"+randomUUID().replaceAll("-","");
 const walletDir=await mkdtemp(join(tmpdir(),"traceforge-claim-wallets-"));
@@ -45,11 +48,21 @@ try {
  conn=await mysql.createConnection({host:local.MYSQL_HOST,port:Number(local.MYSQL_PORT),user:local.MYSQL_USER,password:local.MYSQL_PASSWORD,database,multipleStatements:true,supportBigNumbers:true,bigNumberStrings:true,charset:"utf8mb4"});
  const env={...process.env,...local,MYSQL_DATABASE:database,TRACEFORGE_CHAIN_ID:"9009",TRACEFORGE_RPC_URL:rpc,TRACEFORGE_CONTRACT_ADDRESS:address,
   TRACEFORGE_DEPLOYMENT_BLOCK:deployment.blockNumber.toString(),TRACEFORGE_RUNTIME_BYTECODE_HASH:keccak256(await client.getBytecode({address})),
-  TRACEFORGE_BROADCAST_ENABLED:"true",TRACEFORGE_BUSINESS_WALLET_DIRECTORY:walletDir,INDEXER_CONFIRMATIONS:"0",API_PORT:"13301",API_HOST:"127.0.0.1"};
+  TRACEFORGE_BROADCAST_ENABLED:"true",TRACEFORGE_BUSINESS_WALLET_DIRECTORY:walletDir,INDEXER_CONFIRMATIONS:"0",API_PORT:String(apiPort),API_HOST:"127.0.0.1"};
  invoke("indexer",indexerDist+"/migrate.js",env);
  invoke("api",apiDist+"/api-migrate.js",env);
  delete env.TRACEFORGE_SIGNER_MAP_FILE;delete env.TRACEFORGE_SIGNER_KEY_FILE;delete env.TRACEFORGE_SIGNER_ADDRESS;
  env.API_BASE_URL=api;
+ const restartApi=async(overrides={})=>{
+  if(child){await new Promise(done=>{child.once("exit",done);child.kill("SIGTERM");});}
+  child=spawn(process.execPath,[apiDist+"/server.js"],{cwd:resolve(root,"api"),env:{...env,...overrides},stdio:["ignore","ignore","pipe"]});
+  let errors="";child.stderr.on("data",chunk=>errors+=chunk);
+  for(let attempt=0;attempt<100;attempt++){
+   if(child.exitCode!==null)throw Error("Isolated API restart failed: "+errors.slice(-1000));
+   try{if((await testFetch(api+"/health")).ok)return;}catch{}
+   await new Promise(done=>setTimeout(done,100));
+  }throw Error("Isolated API restart timed out.");
+ };
  let stderr="";
  child=spawn(process.execPath,[apiDist+"/server.js"],{cwd:resolve(root,"api"),env,stdio:["ignore","ignore","pipe"]});
  child.stderr.on("data",chunk=>stderr+=chunk);
@@ -183,6 +196,7 @@ try {
  const [claims]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(claims[0].total),2);
  invoke("indexer",indexerDist+"/project.js",env);const [again]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(again[0].total),2);
  checks.push("Projector runs repeatedly without duplicate custody receipts; confirmed journals remove serialized transactions.");
+ const erp=await erpIntegrationChecks({request,read,sync,conn,api,actors,invoke,env,apiDist,checks,fetcher:testFetch,restartApi});
  const browser=process.env.TRACEFORGE_TEST_UI==="true"
   ?await browserIntegrationChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,root,walletDir,fetcher:testFetch})
   :null;
@@ -207,8 +221,8 @@ try {
  assert.equal((await read("getEntity",[other.user.tenantId,second])).closed,false);
  const [disabledJournal]=await conn.query("SELECT COUNT(*) AS total FROM chain_write_operations");assert.equal(Number(disabledJournal[0].total),Number(journalAll[0].total));
  checks.push("Disabling broadcasts blocks both generic and operator writes without creating journal entries or changing chain state.");
- const evidence={passed:true,checks,browser,confirmedTransactions:Number(journal[0].total),failedConcurrentTransactions:Number(journalAll[0].failed)};
- await writeFile(join(tmpdir(),"TraceForge-Quantity-Integration-2026-10-06.json"),JSON.stringify(evidence,null,2));
+ const evidence={passed:true,checks,browser,erp,confirmedTransactions:Number(journal[0].total),failedConcurrentTransactions:Number(journalAll[0].failed)};
+ await writeFile(join(tmpdir(),"TraceForge-Quantity-Integration-"+apiPort+"-2026-10-07.json"),JSON.stringify(evidence,null,2));
  console.log(JSON.stringify(evidence,null,2));
 } finally {
  child?.kill("SIGTERM");await conn?.end();

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createWalletClient, decodeEventLog, defineChain, encodeFunctionData, http, keccak256, zeroHash } from "viem";
+import { BaseError, ContractFunctionRevertedError, createWalletClient, decodeEventLog, defineChain, encodeFunctionData, http, keccak256, zeroHash } from "viem";
 import type { Hex } from "viem";
 import type { RowDataPacket } from "mysql2/promise";
 import { businessReceiptMatches } from "./business-receipt.js";
@@ -64,7 +64,10 @@ export async function businessWrite(input: BusinessWrite) {
       try {
         await chainClient.simulateContract({ address: contractAddress, abi, functionName: input.operation,
           args: input.args as any, account: account.address } as any);
-      } catch { throw new BusinessProblem("operation_not_allowed"); }
+      } catch (error) {
+        const reverted = error instanceof BaseError && error.walk(cause => cause instanceof ContractFunctionRevertedError) instanceof ContractFunctionRevertedError;
+        throw new BusinessProblem(reverted ? "operation_not_allowed" : "chain_unavailable", reverted ? 409 : 503);
+      }
       const data = encodeFunctionData({ abi, functionName: input.operation, args: input.args as any } as any);
       const nonce = await chainClient.getTransactionCount({ address: account.address, blockTag: "pending" });
       const gasEstimate = await chainClient.estimateGas({ account: account.address, to: contractAddress, data, gasPrice: 0n });

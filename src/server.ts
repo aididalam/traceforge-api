@@ -30,6 +30,8 @@ import { registerPublicProductRoutes } from "./routes/public-products.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { businessActions } from "./business.js";
 import { registerOperatorRoutes } from "./routes/operator.js";
+import { registerErpRoutes } from "./routes/erp.js";
+import {createErpKey,listErpKeys,revokeErpKey} from "./erp.js";
 import { registerPreflightRoutes } from "./routes/preflight.js";
 import { registerGenericWriteSimulationRoutes } from "./routes/generic-write-simulate.js";
 import { registerGenericWriteBroadcastRoutes } from "./routes/generic-write-broadcast.js";
@@ -74,7 +76,7 @@ await app.register(
       (request) => {
         // Use the router's template so encoded prefixes share the same budget.
         const routePath = request.routeOptions.url ?? request.url;
-        return !routePath.startsWith("/v1/") && !routePath.startsWith("/public/") && !routePath.startsWith("/operator/");
+        return !routePath.startsWith("/v1/") && !routePath.startsWith("/public/") && !routePath.startsWith("/operator/") && !routePath.startsWith("/integration/");
       },
 
     errorResponseBuilder:
@@ -368,9 +370,9 @@ await app.register(
           "Tenant-scoped HTTP API over the TraceForge indexed MySQL read model.",
 
         version:
-          "0.15.0",
+          "0.18.0",
       },
-      components: { securitySchemes: { operatorSession: { type: "http", scheme: "bearer", description: "Short-lived business account session, held by the operator gateway." } } },
+      components: { securitySchemes: { operatorSession: { type: "http", scheme: "bearer", description: "Short-lived business account session, held by the operator gateway." }, erpKey: {type:"http",scheme:"bearer",description:"Revocable, scoped ERP integration key."} } },
     },
   },
 );
@@ -1457,7 +1459,9 @@ app.get<{
 );
 
 await registerAuthRoutes(app);
-await registerOperatorRoutes(app, { db, chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress, actions: businessActions });
+await registerOperatorRoutes(app, { db, chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress, actions: businessActions,
+  keyActions:{create:createErpKey,list:listErpKeys,revoke:revokeErpKey} });
+await registerErpRoutes(app);
 await registerPreflightRoutes(app);
 await registerGenericWriteSimulationRoutes(app);
 await registerGenericWriteBroadcastRoutes(app);

@@ -17,6 +17,33 @@ npm start
 
 Apply indexer migrations first. Business writes require `TRACEFORGE_BROADCAST_ENABLED=true` and an owner-only `TRACEFORGE_BUSINESS_WALLET_DIRECTORY`. The repository default disables writes. Keys and credentials must never be committed.
 
+## ERP connectors and queued checkout
+
+The integration API accepts existing product codes and 1–100 create/receive/remove
+operations per durable job. Business accounts create scoped, expiring/revocable
+keys through `/operator/v1/integration-keys`; ERP servers use those keys on
+`/integration/v1`. Submit to `POST /integration/v1/jobs`, then poll
+`GET /integration/v1/jobs/:jobId` for per-item confirmation. The API acknowledges
+the database record before blockchain work; successful lines remain confirmed
+if another line fails. Whole-request/item retries are idempotent across jobs.
+
+Apply migration 011, build, and run `npm run erp:worker` alongside the API and
+existing indexer/publication refresh. The worker preserves order per business,
+frozen versions/payloads and the existing nonce lock/write journal. It recovers
+expired leases and uncertain writes after process restarts. Scanning/search are
+read-only and retain private-product boundaries. Run `npm run test:erp-input` and
+the existing disposable `test:direct-claim` harness for actual HTTP/MySQL/chain
+and worker recovery acceptance. See the parent's
+[ERP setup, payloads and delivery rules](https://github.com/aididalam/traceforge/blob/main/docs/erp-integration.md).
+
+`npm run demo:erp -- --broadcast` explicitly creates three dedicated live demo
+products, receives them at the demo shop and submits one queued checkout. It
+keeps resumable credentials in an owner-only local file and refuses to repeat
+a completed deployment's demonstration. `npm run verify:live-erp` checks the
+saved receipt set and current chain/SQL stock without creating new operations.
+Existing `verify:live-batch` continues checking its original demo receipts even
+when additional ERP operations have been recorded.
+
 ## Product ID and batch API (Phase 3)
 
 The quantity upgrade is implemented, tested and activated on Pi. The local API

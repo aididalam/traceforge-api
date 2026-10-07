@@ -1,6 +1,6 @@
 {
   "name": "@traceforge/api",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "TraceForge tenant-scoped HTTP API over the indexed MySQL read model",
   "main": "index.js",
   "scripts": {
@@ -43,10 +43,15 @@
     "test:direct-claim": "node scripts/test-direct-claim-integration.mjs",
     "demo:batch": "node scripts/exercise-live-batch.mjs",
     "verify:live-batch": "node scripts/verify-live-batch.mjs",
+    "erp:worker": "node dist/erp-worker.js",
+    "erp:worker:once": "node dist/erp-worker.js --once",
+    "test:erp-input": "node --test scripts/test-erp-input.mjs",
     "business:codes:backfill": "tsx src/backfill-business-codes.ts",
     "verify:public-products": "node scripts/verify-public-products.mjs",
     "verify:product-input": "node scripts/verify-product-input.mjs",
-    "public:sync": "tsx src/sync-business-publications.ts"
+    "public:sync": "tsx src/sync-business-publications.ts",
+    "demo:erp": "node scripts/exercise-live-erp.mjs",
+    "verify:live-erp": "node scripts/verify-live-erp.mjs"
   },
   "keywords": [],
   "author": "",

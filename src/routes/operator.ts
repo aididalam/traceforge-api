@@ -10,6 +10,8 @@ import type { ReceiveInput,RemoveInput } from "../business.js";
 import { productRegistration,productId,productQuantity,removalInput,removalReasons,maxProductQuantity } from "../product-input.js";
 import { normalizeBusinessCode } from "../business-codes.js";
 import { productRoutes,productHolders,searchProductReferences } from "../product-quantity.js";
+import {registerErpKeyRoutes} from "./erp-keys.js";
+import type {ErpKeyActions} from "./erp-keys.js";
 declare module "fastify" { interface FastifyContextConfig { operatorPublic?: boolean } }
 
 const bytes32 = /^0x[0-9a-fA-F]{64}$/;
@@ -39,7 +41,7 @@ function pagination(query:{after?:string;limit?:string}) {
   return {after,limit};
 }
 
-export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<Pool,"query"|"getConnection">;chainId:number;contractAddress:string;actions?:typeof businessActions}) {
+export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<Pool,"query"|"getConnection">;chainId:number;contractAddress:string;actions?:typeof businessActions;keyActions?:ErpKeyActions}) {
   const {db}=deps,scope:[number,string]=[deps.chainId,deps.contractAddress.toLowerCase()];
   await app.register(async operator=>{
     operator.addHook("onRequest",async(_request,reply)=>{reply.header("Cache-Control","no-store");});
@@ -50,7 +52,7 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
       const keys=route.endsWith("/search")?["after","limit","id","businessCode"]:["after","limit"];
       if([...query.keys()].some(key=>!paging||!keys.includes(key)||query.getAll(key).length>1))
         return reply.code(400).send(failure("invalid_request","Invalid request parameters."));
-      const allowed=route.endsWith("/signup")?["email","password","name","businessName","businessType","publicProfile","businessCode"]:route.endsWith("/create")?["name","id","quantity","description","fields","publish","idempotencyKey"]:route.endsWith("/receive")?["version","confirmed","idempotencyKey","sourceRouteId","quantity"]:route.endsWith("/close")||route.endsWith("/remove")?["reason","reasonText","routeId","quantity","version","confirmed","idempotencyKey"]:route.endsWith("/login")?["email","password"]:route.endsWith("/activate")?["email","password","name","invitationCode"]:[];
+      const allowed=route.endsWith("/integration-keys")?["name","scopes","expiresInDays"]:route.endsWith("/signup")?["email","password","name","businessName","businessType","publicProfile","businessCode"]:route.endsWith("/create")?["name","id","quantity","description","fields","publish","idempotencyKey"]:route.endsWith("/receive")?["version","confirmed","idempotencyKey","sourceRouteId","quantity"]:route.endsWith("/close")||route.endsWith("/remove")?["reason","reasonText","routeId","quantity","version","confirmed","idempotencyKey"]:route.endsWith("/login")?["email","password"]:route.endsWith("/activate")?["email","password","name","invitationCode"]:[];
       if(request.body&&typeof request.body==='object'&&Object.keys(request.body).some(key=>!allowed.includes(key)))
         return reply.code(400).send(failure("invalid_request","Check the information provided."));
       if(route.endsWith("/signup")&&(!request.body||typeof (request.body as Record<string,unknown>).businessType!=="string"))
@@ -220,5 +222,6 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
     });
     operator.get("/businesses",{schema:{tags:["operator-dashboard"],security:[{operatorSession:[]}],querystring:noQuery}},async request=>businesses(db,context(request).tenantId));
     operator.get("/operations",{schema:{tags:["operator-dashboard"],security:[{operatorSession:[]}],querystring:noQuery}},async request=>operations(db,context(request)));
+    await registerErpKeyRoutes(operator,context,deps.keyActions);
   },{prefix:"/operator/v1"});
 }
