@@ -1,0 +1,10 @@
+.git
+.env*
+!.env.example
+node_modules
+dist*
+test
+test-results
+*.log
+config
+Dockerfile

@@ -46,7 +46,7 @@ async function execute(principal: ErpPrincipal, request: Prepared) {
 
 // One organization is processed in order. A durable lease and the existing wallet
 // lock/journal make worker restarts and uncertain blockchain responses recoverable.
-export async function processErpQueueOnce(): Promise<{processed: number; pending: number}> {
+export async function processErpQueueOnce(options: {shouldStop?:()=>boolean} = {}): Promise<{processed: number; pending: number}> {
   const [candidates] = await db.query<RowDataPacket[]>(`SELECT o.* FROM erp_operations o
     WHERE o.chain_id=? AND o.contract_address=? AND o.status IN ${active}
       AND o.next_attempt_at<=CURRENT_TIMESTAMP(3) AND (o.lease_until IS NULL OR o.lease_until<=CURRENT_TIMESTAMP(3))
@@ -56,6 +56,7 @@ export async function processErpQueueOnce(): Promise<{processed: number; pending
     ORDER BY o.sequence_id LIMIT 25`, [...erpScope]);
   let processed = 0;
   for (const candidate of candidates) {
+    if(options.shouldStop?.())break;
     const conn = await db.getConnection(), lock = "tf-erp-work:" + digest(candidate.organization_id).slice(0, 40);
     const leaseToken = randomUUID();
     let locked = false, heartbeat: ReturnType<typeof setInterval> | undefined;

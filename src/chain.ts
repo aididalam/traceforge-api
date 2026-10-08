@@ -15,13 +15,12 @@ import {
 import {
   traceForgeReadAbi,
 } from "./traceforge-read-abi.js";
+import {verifiedTransport} from './rpc-transport.js';
+export const chainTransport=()=>verifiedTransport({urls:[config.traceforge.rpcUrl,...(process.env.TRACEFORGE_RPC_FALLBACK_URLS||'').split(',').filter(Boolean)],chainId:config.traceforge.chainId,contractAddress:config.traceforge.contractAddress,runtimeHash:config.traceforge.runtimeBytecodeHash});
 
 export const chainClient =
   createPublicClient({
-    transport:
-      http(
-        config.traceforge.rpcUrl,
-      ),
+    transport: chainTransport(),
   });
 
 export const contractAddress =

@@ -181,3 +181,11 @@ database and wallet directory. It deploys the compiled contract to localhost
 port 18545 and starts an isolated API on port 13301. A stale concurrent operation
 may be rejected before broadcast or recorded as a reverted transaction; either
 case leaves exactly one successful receipt and conserved stock.
+
+## Docker deployment
+
+The parent repository provides Docker Compose configuration, private persistent
+storage, runtime domain settings and backup/recovery commands. See the
+[Docker deployment guide](https://github.com/aididalam/traceforge/blob/main/docs/docker-deployment.md).
+The Dockerfile packages compiled runtime code and required assets. Configuration
+and credentials are supplied at runtime; wallet keys remain in private storage.

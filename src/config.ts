@@ -1,4 +1,5 @@
 import "dotenv/config";
+import {secret} from './secrets.js';
 
 function required(
   name: string,
@@ -99,6 +100,8 @@ export const config = {
     process.env.API_HOST ??
     "127.0.0.1",
 
+  proxyKey: secret('TRACEFORGE_PROXY_KEY'),
+
   port:
     positiveInteger(
       "API_PORT",
@@ -178,8 +181,6 @@ export const config = {
       ),
 
     password:
-      required(
-        "MYSQL_PASSWORD",
-      ),
+      secret('MYSQL_PASSWORD') ?? required('MYSQL_PASSWORD'),
   },
 };

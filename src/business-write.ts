@@ -5,7 +5,7 @@ import type { RowDataPacket } from "mysql2/promise";
 import { businessReceiptMatches } from "./business-receipt.js";
 import { config } from "./config.js";
 import { db } from "./db.js";
-import { chainClient, contractAddress } from "./chain.js";
+import { chainClient, chainTransport, contractAddress } from "./chain.js";
 import { traceForgeWriteAbi as abi } from "./traceforge-write-abi.js";
 import { loadOrganizationAccount } from "./signer.js";
 import { runtimeBytecodeIntegrity } from "./runtime-integrity.js";
@@ -69,10 +69,14 @@ export async function businessWrite(input: BusinessWrite) {
         throw new BusinessProblem(reverted ? "operation_not_allowed" : "chain_unavailable", reverted ? 409 : 503);
       }
       const data = encodeFunctionData({ abi, functionName: input.operation, args: input.args as any } as any);
-      const nonce = await chainClient.getTransactionCount({ address: account.address, blockTag: "pending" });
+      const chainNonce = await chainClient.getTransactionCount({ address: account.address, blockTag: "pending" });
+      const [nonceRows]=await conn.query<RowDataPacket[]>(`SELECT MAX(nonce) nonce FROM chain_write_operations WHERE organization_id=? AND block_number IS NOT NULL
+        AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.chainId'))=? AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.contractAddress'))=?
+        AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.signerAddress'))=?`,[input.organizationId,String(config.traceforge.chainId),contractAddress,account.address]);
+      const nonce = Math.max(chainNonce,nonceRows[0].nonce==null?0:Number(nonceRows[0].nonce)+1);
       const gasEstimate = await chainClient.estimateGas({ account: account.address, to: contractAddress, data, gasPrice: 0n });
       const gasLimit = (gasEstimate * 120n + 99n) / 100n;
-      const wallet = createWalletClient({ account, chain, transport: http(config.traceforge.rpcUrl) });
+      const wallet = createWalletClient({ account, chain, transport: chainTransport() });
       const serialized = await wallet.signTransaction({ to: contractAddress, data, nonce, gas: gasLimit, gasPrice: 0n, type: "legacy" });
       const operationId = randomUUID();
       await insertPreparedWriteOperation({ operationId, idempotencyKey: key, requestHash, tokenId: input.accountId,

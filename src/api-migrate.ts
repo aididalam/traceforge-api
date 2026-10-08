@@ -15,6 +15,8 @@ import {
   db,
 } from "./db.js";
 import {backfillBusinessCodes} from "./business-codes.js";
+import {config} from './config.js';
+import {createHash} from 'node:crypto';
 
 interface MigrationRow
   extends RowDataPacket {
@@ -40,6 +42,12 @@ const migrationsDir =
   resolve(
     "migrations",
   );
+
+const migrationLock = await db.getConnection();
+const migrationLockName='tf-migrate:'+createHash('sha256').update(config.mysql.database).digest('hex').slice(0,48);
+const [lockRows] = await migrationLock.query<RowDataPacket[]>('SELECT GET_LOCK(?,120) acquired', [migrationLockName]);
+if (Number(lockRows[0].acquired) !== 1) {migrationLock.release(); await db.end(); throw Error('Database migration is already in progress');}
+try {
 
 await db.query(
   `
@@ -160,12 +168,14 @@ for (
   }
 }
 
-try {
-  const count=await backfillBusinessCodes(db);
-  console.log(`Business code reservations verified for ${count} businesses.`);
-} finally {await db.end();}
+const count=await backfillBusinessCodes(db);
+console.log(`Business code reservations verified for ${count} businesses.`);
 
 console.log();
 console.log(
   "API migrations complete.",
 );
+} finally {
+  await migrationLock.query('SELECT RELEASE_LOCK(?)', [migrationLockName]);
+  migrationLock.release(); await db.end();
+}

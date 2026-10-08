@@ -3,6 +3,8 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import {proxyClient} from './proxy-client.js';
+import {deploymentReadiness} from './deployment-readiness.js';
 
 import type {
   RowDataPacket,
@@ -43,6 +45,7 @@ const app =
         paths: [
           "req.headers.authorization",
           "req.headers.cookie",
+          "req.headers.x-traceforge-proxy-key",
           "req.body.password",
           "req.body.invitationCode",
         ],
@@ -68,6 +71,8 @@ await app.register(
 
     max:
       120,
+
+    keyGenerator: request => proxyClient(request.headers, request.ip, config.proxyKey),
 
     timeWindow:
       "1 minute",
@@ -550,6 +555,7 @@ app.get(
       await db.query(
         "SELECT 1",
       );
+      if(process.env.TRACEFORGE_DEPLOYMENT_READINESS==='true')await deploymentReadiness();
 
       return {
         database:
@@ -563,8 +569,8 @@ app.get(
       );
 
       return apiError(
-        "database_unavailable",
-        "Database is unavailable.",
+        process.env.TRACEFORGE_DEPLOYMENT_READINESS==='true'?"deployment_unavailable":"database_unavailable",
+        process.env.TRACEFORGE_DEPLOYMENT_READINESS==='true'?"Database or blockchain is unavailable.":"Database is unavailable.",
       );
     }
   },
