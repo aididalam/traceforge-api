@@ -37,6 +37,9 @@ import {createErpKey,listErpKeys,revokeErpKey} from "./erp.js";
 import { registerPreflightRoutes } from "./routes/preflight.js";
 import { registerGenericWriteSimulationRoutes } from "./routes/generic-write-simulate.js";
 import { registerGenericWriteBroadcastRoutes } from "./routes/generic-write-broadcast.js";
+import {registerNetworkBootstrapRoutes} from './routes/network-bootstrap.js';
+import {readNetworkBundle, readNetworkToken} from './network-bootstrap.js';
+import {chainClient} from './chain.js';
 
 const app =
   Fastify({
@@ -81,7 +84,7 @@ await app.register(
       (request) => {
         // Use the router's template so encoded prefixes share the same budget.
         const routePath = request.routeOptions.url ?? request.url;
-        return !routePath.startsWith("/v1/") && !routePath.startsWith("/public/") && !routePath.startsWith("/operator/") && !routePath.startsWith("/integration/");
+        return !routePath.startsWith("/v1/") && !routePath.startsWith("/public/") && !routePath.startsWith("/operator/") && !routePath.startsWith("/integration/") && !routePath.startsWith("/network/");
       },
 
     errorResponseBuilder:
@@ -377,7 +380,7 @@ await app.register(
         version:
           "0.18.0",
       },
-      components: { securitySchemes: { operatorSession: { type: "http", scheme: "bearer", description: "Short-lived business account session, held by the operator gateway." }, erpKey: {type:"http",scheme:"bearer",description:"Revocable, scoped ERP integration key."} } },
+      components: { securitySchemes: { operatorSession: { type: "http", scheme: "bearer", description: "Short-lived business account session, held by the operator gateway." }, erpKey: {type:"http",scheme:"bearer",description:"Revocable, scoped ERP integration key."}, networkBootstrapKey: {type:"http",scheme:"bearer",description:"Separate deployment token for node bootstrap; no business or write permissions."} } },
     },
   },
 );
@@ -1465,6 +1468,16 @@ app.get<{
 );
 
 await registerAuthRoutes(app);
+await registerNetworkBootstrapRoutes(app, {
+  enabled: process.env.TRACEFORGE_NETWORK_BOOTSTRAP_ENABLED === 'true',
+  token: () => readNetworkToken(process.env.TRACEFORGE_NETWORK_BOOTSTRAP_TOKEN_FILE || ''),
+  bundle: () => readNetworkBundle(process.env.TRACEFORGE_NETWORK_BUNDLE_FILE || '', config.traceforge.chainId),
+  genesisHash: async () => {
+    const block = await chainClient.getBlock({blockNumber: 0n});
+    if (!block.hash) throw Error('Genesis block unavailable');
+    return block.hash;
+  },
+});
 await registerOperatorRoutes(app, { db, chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress, actions: businessActions,
   keyActions:{create:createErpKey,list:listErpKeys,revoke:revokeErpKey} });
 await registerErpRoutes(app);

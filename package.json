@@ -46,6 +46,7 @@
     "erp:worker": "node dist/erp-worker.js",
     "erp:worker:once": "node dist/erp-worker.js --once",
     "test:erp-input": "node --test scripts/test-erp-input.mjs",
+    "test:network-bootstrap": "npm run build && node --test scripts/test-network-bootstrap.mjs",
     "business:codes:backfill": "tsx src/backfill-business-codes.ts",
     "verify:public-products": "node scripts/verify-public-products.mjs",
     "verify:product-input": "node scripts/verify-product-input.mjs",
