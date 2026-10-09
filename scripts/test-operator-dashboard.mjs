@@ -20,7 +20,7 @@ try{
  // MySQL cannot reopen a connection-local TEMPORARY table under two aliases.
  // Document/semantic mirrors start empty; the event mirror copies raw fixtures.
  // only physical test table names change, never predicates, joins or values.
- for(const [original,mirror] of [["offchain_documents","operator_test_tenant_documents"],["offchain_documents","operator_test_holder_documents"],["semantic_registry","operator_test_state_semantics"],["chain_events","operator_test_companion_events"],["chain_events","operator_test_registration_events"]]){
+ for(const [original,mirror] of [["offchain_documents","operator_test_tenant_documents"],["offchain_documents","operator_test_holder_documents"],["semantic_registry","operator_test_state_semantics"],["chain_events","operator_test_companion_events"],["chain_events","operator_test_registration_events"],["chain_events","operator_test_movement_events"]]){
   const [rows]=await db.query("SHOW CREATE TABLE `"+original+"`");
   await conn.query(rows[0]["Create Table"].replace("CREATE TABLE `"+original+"`","CREATE TEMPORARY TABLE `"+mirror+"`"));
  }
@@ -30,8 +30,10 @@ try{
    await conn.query("INSERT INTO operator_test_companion_events SELECT * FROM chain_events");
    await conn.query("DELETE FROM operator_test_registration_events");
    await conn.query("INSERT INTO operator_test_registration_events SELECT * FROM chain_events");
+   await conn.query("DELETE FROM operator_test_movement_events");
+   await conn.query("INSERT INTO operator_test_movement_events SELECT * FROM chain_events");
   }
-  return conn.query(sql.replace("LEFT JOIN offchain_documents td","LEFT JOIN operator_test_tenant_documents td").replace("LEFT JOIN offchain_documents od","LEFT JOIN operator_test_holder_documents od").replace("LEFT JOIN semantic_registry st","LEFT JOIN operator_test_state_semantics st").replace("FROM chain_events companion","FROM operator_test_companion_events companion").replace("FROM chain_events registration","FROM operator_test_registration_events registration"),args).catch(error=>{console.error("Temporary fixture query failed:",error.code);throw error;});};
+  return conn.query(sql.replace("LEFT JOIN offchain_documents td","LEFT JOIN operator_test_tenant_documents td").replace("LEFT JOIN offchain_documents od","LEFT JOIN operator_test_holder_documents od").replace("LEFT JOIN semantic_registry st","LEFT JOIN operator_test_state_semantics st").replace("FROM chain_events companion","FROM operator_test_companion_events companion").replace("FROM chain_events registration","FROM operator_test_registration_events registration").replace("FROM chain_events movement","FROM operator_test_movement_events movement"),args).catch(error=>{console.error("Temporary fixture query failed:",error.code);throw error;});};
  const q=async(sql,args=[])=>conn.query(sql,args);
  const h=byte=>"0x"+byte.repeat(32),tenant=h("ab"),other=h("12"),org=h("cd"),org2=h("ef"),product=h("34"),meta=h("56");
  const password="Synthetic-Only-Password-2026",invitation=credential("tfoi");

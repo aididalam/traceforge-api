@@ -1,4 +1,5 @@
-// A disposable MySQL database and local Hardhat chain. Never points at Pi.
+// Disposable contract and MySQL database. An explicitly selected loopback Besu RPC is also supported on Pi.
+import {receiptApprovalChecks} from "./receipt-approval-checks.mjs";
 import {batchChecks} from "./batch-integration-checks.mjs";
 import {browserIntegrationChecks} from "./browser-integration-checks.mjs";
 import {erpIntegrationChecks} from "./erp-integration-checks.mjs";
@@ -6,6 +7,7 @@ import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
+import {writeFileSync} from 'node:fs';
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import mysql from "mysql2/promise";
@@ -15,7 +17,7 @@ import { createPublicClient, createWalletClient, defineChain, http, keccak256, s
 const apiDist=process.env.TRACEFORGE_TEST_API_DIST??"dist",indexerDist=process.env.TRACEFORGE_TEST_INDEXER_DIST??"dist";
 const apiPort=Number(process.env.TRACEFORGE_TEST_API_PORT??13301);
 assert.ok(Number.isInteger(apiPort)&&apiPort>=13301&&apiPort<=13399,"Use an isolated loopback test port.");
-const root=resolve(".."),rpc="http://127.0.0.1:18545",api="http://127.0.0.1:"+apiPort;
+const root=resolve(".."),rpc=process.env.TRACEFORGE_TEST_RPC_URL??"http://127.0.0.1:18545",api="http://127.0.0.1:"+apiPort;
 const local={...dotenv.parse(await readFile(".env","utf8").catch(error=>{if(error.code!=="ENOENT")throw error;return "";})),...process.env};
 const database="traceforge_test_claim_"+randomUUID().replaceAll("-","");
 const walletDir=await mkdtemp(join(tmpdir(),"traceforge-claim-wallets-"));
@@ -32,15 +34,22 @@ async function testFetch(...args){
 }
 let child,conn;
 const invoke=(folder,file,env,args=[])=>{
- const result=spawnSync(process.execPath,[file,...args],{cwd:resolve(root,folder),env,encoding:"utf8",timeout:30000});
- if(result.status!==0)throw Error(`Isolated ${folder}/${file} failed: ${result.stderr.split("\n").filter(line=>!line.includes("data:text")).slice(-8).join("\n")}`);
+ const result=spawnSync(process.execPath,[file,...args],{cwd:resolve(root,folder),env,encoding:"utf8",timeout:180000});
+ if(result.status!==0){
+  // Keep detailed subprocess diagnostics in an owner-only file, as assertion
+  // output may include synthetic credentials. Console summaries remain bounded.
+  writeFileSync(process.env.TRACEFORGE_TEST_FAILURE_LOG??join(tmpdir(),'TraceForge-Approval-Failure-'+apiPort+'.log'),result.stdout+'\n'+result.stderr,{mode:0o600});
+  const failures=result.stdout.split('\n').filter(line=>/^\s*not ok /.test(line)).slice(-8).join('\n');
+  throw Error(`Isolated ${folder}/${file} failed: ${failures}\n${result.stderr.split("\n").filter(line=>!line.includes("data:text")).slice(-8).join("\n")}`);
+ }
 };
 try {
  assert.equal(await client.getChainId(),9009);
- assert.equal(new URL(rpc).port,"18545");
+ assert.ok(["127.0.0.1","localhost"].includes(new URL(rpc).hostname),"Integration requires an explicitly selected local private RPC.");
  const artifact=JSON.parse(await readFile(resolve(root,"contracts/artifacts/contracts/TraceForge.sol/TraceForge.json"),"utf8"));
- const accounts=await client.request({method:"eth_accounts"});
- const wallet=createWalletClient({account:accounts[0],chain,transport:http(rpc)});
+ const accounts=await client.request({method:"eth_accounts"}).catch(()=>[]);
+ const {generatePrivateKey,privateKeyToAccount}=await import("viem/accounts");
+ const wallet=createWalletClient({account:accounts[0]??privateKeyToAccount(generatePrivateKey()),chain,transport:http(rpc)});
  const tx=await wallet.deployContract({abi:artifact.abi,bytecode:artifact.bytecode,gasPrice:0n});
  const deployment=await client.waitForTransactionReceipt({hash:tx}),address=deployment.contractAddress;
  assert.ok(address);assert.equal(deployment.status,"success");
@@ -57,20 +66,35 @@ try {
   if(child){await new Promise(done=>{child.once("exit",done);child.kill("SIGTERM");});}
   child=spawn(process.execPath,[apiDist+"/server.js"],{cwd:resolve(root,"api"),env:{...env,...overrides},stdio:["ignore","ignore","pipe"]});
   let errors="";child.stderr.on("data",chunk=>errors+=chunk);
-  for(let attempt=0;attempt<100;attempt++){
+  for(let attempt=0;attempt<300;attempt++){
    if(child.exitCode!==null)throw Error("Isolated API restart failed: "+errors.slice(-1000));
    try{if((await testFetch(api+"/health")).ok)return;}catch{}
    await new Promise(done=>setTimeout(done,100));
   }throw Error("Isolated API restart timed out.");
  };
- let stderr="";
- child=spawn(process.execPath,[apiDist+"/server.js"],{cwd:resolve(root,"api"),env,stdio:["ignore","ignore","pipe"]});
- child.stderr.on("data",chunk=>stderr+=chunk);
- for(let i=0;i<80;i++){if(child.exitCode!==null)throw Error("Isolated API failed to start: "+stderr.slice(-1500));try{if((await testFetch(api+"/health")).ok)break;}catch{}await new Promise(done=>setTimeout(done,100));}
+ // Do not proceed after exhausting startup polling; slower ARM64 hosts must
+ // reach real readiness before any HTTP acceptance assertions are attempted.
+ await restartApi();
  invoke("api","--test",env,["test/acceptance.test.mjs"]);
  invoke("api","scripts/verify-write-journal-readiness.mjs",env);
  const sync=()=>{invoke("indexer",indexerDist+"/backfill.js",env);invoke("indexer",indexerDist+"/project.js",env);invoke("api",apiDist+"/sync-business-publications.js",env);};
  const request=async(path,payload,token)=>{const response=await testFetch(api+"/operator/v1"+path,{method:payload?"POST":"GET",headers:{...(payload?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{})},...(payload?{body:JSON.stringify(payload)}:{})});return {status:response.status,body:await response.json()};};
+ const approve=async(pending)=>{
+  const [rows]=await conn.query("SELECT source_organization_id FROM receipt_requests WHERE request_id=?",[pending.receiptRequestId]);
+  const owner=actors.find(a=>a.user.organizationId===rows[0].source_organization_id);assert.ok(owner);
+  const decision=await request("/receipt-requests/decisions",{requestIds:[pending.receiptRequestId],action:"approve",idempotencyKey:randomUUID()},owner.token);
+  assert.equal(decision.status,202,JSON.stringify(decision.body));assert.equal(decision.body.results[0].ok,true,JSON.stringify(decision.body));
+  for(let i=0;i<10;i++){
+   invoke("api",apiDist+"/erp-worker.js",env,["--once"]);
+   const [current]=await conn.query("SELECT status,result_json FROM receipt_requests WHERE request_id=?",[pending.receiptRequestId]);
+   assert.ok(!["FAILED","EXPIRED"].includes(current[0].status),JSON.stringify(current[0]));
+   if(current[0].status==="CONFIRMED"){
+    const result=typeof current[0].result_json==='string'?JSON.parse(current[0].result_json):current[0].result_json;
+    return {...result,receiptRequestId:pending.receiptRequestId,status:'CONFIRMED',trackingId:pending.trackingId,quantity:pending.quantity,...(pending.receivedRouteId?{receivedRouteId:pending.receivedRouteId}:{})};
+   }
+   await conn.query("UPDATE receipt_requests SET next_attempt_at=CURRENT_TIMESTAMP WHERE request_id=?",[pending.receiptRequestId]);
+  }throw Error("Owner-approved receipt did not confirm");
+ };
  const password="Synthetic-Only-Password-2026";
  const actors=[];
  for(const [name,type] of [["Test Producer","Producer"],["Test Distributor","Customs broker & inspection"],["Test Shop","Shop"],["Other Producer","Producer"]]){
@@ -87,6 +111,15 @@ try {
  const customBusiness=(await request("/businesses",undefined,producer.token)).body.businesses.find(item=>item.id===distributor.user.organizationId);
  assert.equal(customBusiness.type,"Customs broker & inspection");
  checks.push("Independent registration stores and displays an arbitrary business type; the business participates in the same dynamic custody flow.");
+ if(process.env.TRACEFORGE_TEST_UI_ONLY==='true') {
+  const read=(functionName,args)=>client.readContract({address,abi:artifact.abi,functionName,args});
+  const browser=await browserIntegrationChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,root,walletDir,fetcher:testFetch});
+  const [journal]=await conn.query("SELECT COUNT(*) AS total,SUM(serialized_transaction IS NOT NULL) AS signed FROM chain_write_operations WHERE status='CONFIRMED'");
+  assert.equal(Number(journal[0].signed),0);
+  const evidence={passed:true,profile:'browser-only',verifiedAt:new Date().toISOString(),chainId:9009,contractAddress:address,runtimeBytecodeHash:env.TRACEFORGE_RUNTIME_BYTECODE_HASH,checks,browser,confirmedTransactions:Number(journal[0].total)};
+  await writeFile(process.env.TRACEFORGE_TEST_REPORT??join(tmpdir(),'TraceForge-Receipt-Browser-Integration.json'),JSON.stringify(evidence,null,2));
+  console.log(JSON.stringify(evidence,null,2));
+ }else {
  const genericToken=async(actor,tenantId)=>{
   const token="Synthetic-Integration-"+randomUUID();
   await conn.query("INSERT INTO api_auth_tokens (token_id,token_hash,token_hint,tenant_id,organization_id,token_name,scopes) VALUES (?,?,?,?,?,?,?)",
@@ -134,14 +167,15 @@ try {
  const receiveBody={version:lookup.body.version,confirmed:true,idempotencyKey:randomUUID()};
  assert.equal((await request("/products/"+first+"/receive",{...receiveBody,confirmed:false},distributor.token)).status,400);
  assert.equal((await request("/products/"+first+"/receive",receiveBody)).status,401);
- const received=await request("/products/"+first+"/receive",receiveBody,distributor.token);assert.equal(received.status,200,JSON.stringify(received.body));assert.equal(received.body.status,"CONFIRMED");sync();
- const retry=await request("/products/"+first+"/receive",receiveBody,distributor.token);assert.equal(retry.status,200);assert.equal(retry.body.transactionHash,received.body.transactionHash);
+ const pending=await request("/products/"+first+"/receive",receiveBody,distributor.token);assert.equal(pending.status,202,JSON.stringify(pending.body));assert.equal(pending.body.status,"WAITING_APPROVAL");assert.deepEqual(await read("getEntity",[producer.user.tenantId,first]),before);
+ const received={status:202,body:await approve(pending.body)};sync();
+ const retry=await request("/products/"+first+"/receive",receiveBody,distributor.token);assert.equal(retry.status,202);assert.equal(retry.body.transactionHash,received.body.transactionHash);
  assert.equal((await request("/products/"+first+"/receive",{...receiveBody,version:"1"},distributor.token)).status,409);
  assert.equal((await read("getEntity",[producer.user.tenantId,first])).currentCustodian,distributor.user.organizationId);
  assert.equal((await request("/products/"+first+"/receive",{version:"0",confirmed:true,idempotencyKey:randomUUID()},shop.token)).status,409);
- checks.push("Scanning does not transfer; explicit receipt changes holder without membership. Retries are idempotent; stale/conflicting claims are rejected.");
+ checks.push("Scanning and pending requests do not transfer; only current-owner approval changes holder without membership. Retries are idempotent; stale/conflicting requests are rejected.");
  const secondLookup=await request("/receive/"+second,undefined,distributor.token);
- assert.equal((await request("/products/"+second+"/receive",{version:secondLookup.body.version,confirmed:true,idempotencyKey:randomUUID()},distributor.token)).status,200);sync();
+ const secondPending=await request("/products/"+second+"/receive",{version:secondLookup.body.version,confirmed:true,idempotencyKey:randomUUID()},distributor.token);assert.equal(secondPending.status,202);await approve(secondPending.body);sync();
  const inventory=await request("/products",undefined,distributor.token);assert.equal(inventory.body.products.length,2);assert.ok(inventory.body.products.every(p=>p.holder.id===distributor.user.organizationId));
  const outsideWriteToken=await genericToken(distributor,other.user.tenantId);
  const closeSimulation=await generic(other.user.tenantId,second,"close/simulate",{eventType,evidenceHash},outsideWriteToken);
@@ -187,7 +221,7 @@ try {
  assert.equal((await testFetch(api+"/public/v1/tracking/"+first)).status,404);
  assert.equal((await request("/receive/"+first,undefined,shop.token)).body.name,null,"Scan preview exposed an unpublished product name");
  checks.push("Public tracking keeps named holders, product details, dates and short IDs. Private products stay hidden, and sync respects explicit unpublishing.");
- await batchChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,fetcher:testFetch});
+ await batchChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,approve,fetcher:testFetch});
  console.log("Isolated single/batch backend acceptance passed.");
  invoke("api","scripts/test-operator-dashboard.mjs",env);
  invoke("api","scripts/test-public-presentation.mjs",env);
@@ -196,6 +230,7 @@ try {
  const [claims]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(claims[0].total),2);
  invoke("indexer",indexerDist+"/project.js",env);const [again]=await conn.query("SELECT COUNT(*) AS total FROM custody_claims");assert.equal(Number(again[0].total),2);
  checks.push("Projector runs repeatedly without duplicate custody receipts; confirmed journals remove serialized transactions.");
+ await receiptApprovalChecks({request,read,sync,conn,actors,invoke,env,apiDist,checks,restartApi});
  const erp=await erpIntegrationChecks({request,read,sync,conn,api,actors,invoke,env,apiDist,checks,fetcher:testFetch,restartApi});
  const browser=process.env.TRACEFORGE_TEST_UI==="true"
   ?await browserIntegrationChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,root,walletDir,fetcher:testFetch})
@@ -206,24 +241,29 @@ try {
  await conn.query(`INSERT INTO chain_write_operations
   (operation_id,idempotency_key,request_hash,token_id,tenant_id,organization_id,entity_id,operation_name,role_id,status,transaction_hash,serialized_transaction,nonce,gas_estimate,gas_limit,request_json)
   VALUES (?,?,?,?,?,?,?,?,?,'PREPARED',?,'synthetic-incomplete',0,1,1,'{}')`,
-  [pendingId,"synthetic-interrupted","0x"+"aa".repeat(32),shop.user.accountId,other.user.tenantId,shop.user.organizationId,second,"claimCustody","0x"+"00".repeat(32),"0x"+"ab".repeat(32)]);
+  [pendingId,"synthetic-interrupted","0x"+"aa".repeat(32),distributor.user.accountId,other.user.tenantId,distributor.user.organizationId,second,"approveReceipt","0x"+"00".repeat(32),"0x"+"ab".repeat(32)]);
  const blockedLookup=await request("/receive/"+second,undefined,shop.token);
- assert.equal((await request("/products/"+second+"/receive",{version:blockedLookup.body.version,confirmed:true,idempotencyKey:randomUUID()},shop.token)).status,429);
+ const blockedRequest=await request("/products/"+second+"/receive",{version:blockedLookup.body.version,confirmed:true,idempotencyKey:randomUUID()},shop.token);assert.equal(blockedRequest.status,202);
+ const queued=await request("/receipt-requests/decisions",{requestIds:[blockedRequest.body.receiptRequestId],action:"approve",idempotencyKey:randomUUID()},distributor.token);assert.equal(queued.body.results[0].ok,true);
+ invoke("api",apiDist+"/erp-worker.js",env,["--once"]);
+ assert.equal((await read("getEntity",[other.user.tenantId,second])).currentCustodian,distributor.user.organizationId);
  await conn.query("DELETE FROM chain_write_operations WHERE operation_id=?",[pendingId]);
- checks.push("An interrupted prepared write blocks a new transaction for the same business until the original operation is recovered.");
+ await conn.query("UPDATE receipt_requests SET next_attempt_at=CURRENT_TIMESTAMP WHERE request_id=?",[blockedRequest.body.receiptRequestId]);await approve(blockedRequest.body);
+ checks.push("An interrupted prepared write holds an owner-approved transfer without taking stock; recovery uses the same request exactly once.");
  await new Promise(done=>{child.once("exit",done);child.kill("SIGTERM");});
  child=spawn(process.execPath,[apiDist+"/server.js"],{cwd:resolve(root,"api"),env:{...env,TRACEFORGE_BROADCAST_ENABLED:"false"},stdio:"ignore"});
  for(let i=0;i<80;i++){if(child.exitCode!==null)throw Error("Disabled isolated API failed to start");try{if((await testFetch(api+"/health")).ok)break;}catch{}await new Promise(done=>setTimeout(done,100));}
  const disabled=await generic(other.user.tenantId,second,"close/broadcast",{eventType,evidenceHash,confirm:"BROADCAST"},outsideWriteToken);
  assert.equal(disabled.status,503);assert.equal(disabled.body.error.code,"broadcast_disabled");
- const disableLookup=await request("/receive/"+second,undefined,shop.token);
- assert.equal((await request("/products/"+second+"/receive",{version:disableLookup.body.version,confirmed:true,idempotencyKey:randomUUID()},shop.token)).status,503);
+ const disableLookup=await request("/receive/"+second,undefined,distributor.token);
+ assert.equal((await request("/products/"+second+"/receive",{version:disableLookup.body.version,confirmed:true,idempotencyKey:randomUUID()},distributor.token)).status,503);
  assert.equal((await read("getEntity",[other.user.tenantId,second])).closed,false);
- const [disabledJournal]=await conn.query("SELECT COUNT(*) AS total FROM chain_write_operations");assert.equal(Number(disabledJournal[0].total),Number(journalAll[0].total));
+ const [disabledJournal]=await conn.query("SELECT COUNT(*) AS total FROM chain_write_operations");assert.equal(Number(disabledJournal[0].total),Number(journalAll[0].total)+1);
  checks.push("Disabling broadcasts blocks both generic and operator writes without creating journal entries or changing chain state.");
- const evidence={passed:true,checks,browser,erp,confirmedTransactions:Number(journal[0].total),failedConcurrentTransactions:Number(journalAll[0].failed)};
- await writeFile(join(tmpdir(),"TraceForge-Quantity-Integration-"+apiPort+"-2026-10-07.json"),JSON.stringify(evidence,null,2));
+ const evidence={passed:true,verifiedAt:new Date().toISOString(),chainId:9009,contractAddress:address,runtimeBytecodeHash:env.TRACEFORGE_RUNTIME_BYTECODE_HASH,checks,browser,erp,confirmedTransactions:Number(journal[0].total)+1,failedConcurrentTransactions:Number(journalAll[0].failed)};
+ await writeFile(process.env.TRACEFORGE_TEST_REPORT??join(tmpdir(),"TraceForge-Receipt-Approval-Integration-"+apiPort+".json"),JSON.stringify(evidence,null,2));
  console.log(JSON.stringify(evidence,null,2));
+ }
 } finally {
  child?.kill("SIGTERM");await conn?.end();
  await admin.query("DROP DATABASE IF EXISTS `"+database+"`");await admin.end();await rm(walletDir,{recursive:true,force:true});

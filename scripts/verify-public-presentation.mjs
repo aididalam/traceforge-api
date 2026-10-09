@@ -61,8 +61,8 @@ await savePublicPresentation(writer,tenant,entity,null); assert.equal(saved,null
 let published = true, staleProduct = false, staleOrganization = false, missingTable = false, brokenProfile = false;
 let presentationQueries = 0;
 const db = { async query(sql, values) {
-  assert.doesNotMatch(sql, /SELECT\s+\*|offchain_documents|document_json|wallet/i);
-  assert.doesNotMatch(sql.split("FROM chain_events ce")[0], /actor/i, "Private actor addresses must never be selected for a public response");
+  assert.doesNotMatch(sql, /SELECT\s+\*|offchain_documents|document_json/i);
+  assert.doesNotMatch(sql.split("FROM chain_events ce")[0], /actor|wallet/i, "Private actor and wallet addresses must never be selected for a public response");
   if (sql.includes("FROM public_entity_publications p")) return [[...(published && values.at(-2) === tenant && values.at(-1) === entity ? [{
     tenant_id: tenant, entity_id: entity, entity_type: hash, entity_type_label: "Batch", metadata_hash: staleProduct ? otherHash : hash,
     current_state: hash, current_state_label: "Packed", current_custodian: distributor.id, closed: 0, created_at: "1790000000", closed_at: null,

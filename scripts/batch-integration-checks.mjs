@@ -4,8 +4,8 @@ import {readdir} from "node:fs/promises";
 import mysql from "mysql2/promise";
 import {loadSourceFile} from "./test-source-loader.mjs";
 
-// Runs inside the disposable direct-claim harness, never against a live service.
-export async function batchChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,fetcher}){
+// Runs inside the disposable receipt-approval harness, never against a live service.
+export async function batchChecks({request,read,sync,conn,api,actors,invoke,env,indexerDist,checks,approve,fetcher}){
  const [producer,distributor,shop,other]=actors;
  const create=async(actor,id,quantity,publish=true)=>{
   const body={name:publish?"Integration batch":"PRIVATE_BATCH_SENTINEL",id,quantity,publish,idempotencyKey:randomUUID(),fields:[{label:"Origin",value:"বাংলাদেশ"}]};
@@ -57,10 +57,10 @@ export async function batchChecks({request,read,sync,conn,api,actors,invoke,env,
  const receive=async(actor,sourceRouteId,version,quantity)=>{
   const body={sourceRouteId,version:String(version),quantity,confirmed:true,idempotencyKey:randomUUID()};
   const result=await request("/products/"+id+"/receive",body,actor.token);
-  assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.status,"CONFIRMED");
+  assert.equal(result.status,202,JSON.stringify(result.body));assert.equal(result.body.status,"WAITING_APPROVAL");
   assert.deepEqual((await request("/products/"+id+"/receive",body,actor.token)).body,result.body);
   assert.equal((await request("/products/"+id+"/receive",{...body,quantity:quantity+1},actor.token)).status,409);
-  sync();return result.body.receivedRouteId;
+  const confirmed=await approve(result.body);sync();return confirmed.receivedRouteId;
  };
  const distFirst=await receive(distributor,root,0,400000);
  const shopFirst=await receive(shop,root,1,300000);
@@ -135,13 +135,17 @@ export async function batchChecks({request,read,sync,conn,api,actors,invoke,env,
  const race=await create(producer,"CONCURRENT",10);sync();
  const raceRoot=(await read("getProduct",[tenant,race.trackingId])).rootRouteId;
  const raceResults=await Promise.all([distributor,shop].map(actor=>request("/products/"+race.trackingId+"/receive",{sourceRouteId:raceRoot,version:"0",quantity:7,confirmed:true,idempotencyKey:randomUUID()},actor.token)));
- assert.deepEqual(raceResults.map(r=>r.status).sort(),[200,409]);sync();
+ assert.deepEqual(raceResults.map(r=>r.status),[202,202]);
+ assert.equal((await read("getBatchRoute",[tenant,race.trackingId,raceRoot])).availableQuantity,10n);
+ const decisions=await request("/receipt-requests/decisions",{requestIds:raceResults.map(r=>r.body.receiptRequestId),action:"approve",idempotencyKey:randomUUID()},producer.token);
+ assert.deepEqual(decisions.body.results.map(r=>r.ok),[true,false]);assert.equal(decisions.body.results[1].error.code,"quantity_exceeds_available");
+ await approve(raceResults[0].body);sync();
  assert.equal((await read("getBatchRoute",[tenant,race.trackingId,raceRoot])).availableQuantity,3n);
- checks.push("Simultaneous receivers of the same source version cannot overdraw stock: exactly one transaction confirms.");
+ checks.push("Simultaneous requests keep stock unchanged; competing bulk approvals cannot overdraw stock, and exactly one transfer confirms.");
  const {quantitySummary}=await loadSourceFile("src/product-quantity.ts");
  assert.equal(await quantitySummary(conn,[9009,"0x"+"ff".repeat(20)],tenant,id),null);
  // Rebuild and incremental replay must be equivalent, and corrupt input must roll back.
- const snapshot=async()=>JSON.stringify((await conn.query("SELECT * FROM product_quantities ORDER BY entity_id"))[0]);
+ const snapshot=async()=>JSON.stringify(Object.fromEntries(await Promise.all(['product_quantities','batch_routes','quantity_movements','custody_claims','receipt_approvals','entities'].map(async table=>[table,(await conn.query('SELECT * FROM '+table+' ORDER BY 1,2,3'))[0]]))));
  const originalSnapshot=await snapshot();invoke("indexer",indexerDist+"/project.js",env);assert.equal(await snapshot(),originalSnapshot);
  invoke("indexer",indexerDist+"/project.js",env,["--rebuild"]);assert.equal(await snapshot(),originalSnapshot);
  const [last]=await conn.query("SELECT id,event_args FROM chain_events WHERE event_name='QuantityRemoved' AND JSON_UNQUOTE(JSON_EXTRACT(event_args,'$.entityId'))=? ORDER BY id DESC LIMIT 1",[id]);

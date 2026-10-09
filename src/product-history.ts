@@ -1,4 +1,4 @@
-// claimCustody/closeEntity emit their business event immediately before a
+// Single receipt approval/closeEntity emit their business event before a
 // matching TraceRecorded log. Keep one business action in paginated histories,
 // while preserving every raw log for the indexer and technical discovery API.
 // Match the adjacent log and its payload, not just the transaction hash: one
@@ -13,9 +13,9 @@ export const businessHistoryPredicate = `NOT (ce.event_name = 'TraceRecorded' AN
     AND JSON_EXTRACT(companion.event_args, '$.eventType') = JSON_EXTRACT(ce.event_args, '$.eventType')
     AND JSON_EXTRACT(companion.event_args, '$.evidenceHash') = JSON_EXTRACT(ce.event_args, '$.evidenceHash')
     AND JSON_EXTRACT(companion.event_args, '$.actor') = JSON_EXTRACT(ce.event_args, '$.actor')
-    AND CASE companion.event_name
-      WHEN 'CustodyClaimed' THEN JSON_EXTRACT(companion.event_args, '$.toOrganizationId')
-      ELSE JSON_EXTRACT(companion.event_args, '$.organizationId') END = JSON_EXTRACT(ce.event_args, '$.organizationId')
+    AND (companion.event_name = 'CustodyClaimed' AND JSON_EXTRACT(ce.event_args, '$.organizationId') IN (
+      JSON_EXTRACT(companion.event_args, '$.fromOrganizationId'), JSON_EXTRACT(companion.event_args, '$.toOrganizationId'))
+      OR companion.event_name = 'EntityClosed' AND JSON_EXTRACT(companion.event_args, '$.organizationId') = JSON_EXTRACT(ce.event_args, '$.organizationId'))
     AND CASE companion.event_name
       WHEN 'EntityClosed' THEN JSON_EXTRACT(companion.event_args, '$.closedAt')
       ELSE JSON_EXTRACT(companion.event_args, '$.timestamp') END = JSON_EXTRACT(ce.event_args, '$.timestamp')
@@ -30,4 +30,21 @@ export const businessHistoryPredicate = `NOT (ce.event_name = 'TraceRecorded' AN
   AND JSON_EXTRACT(registration.event_args,'$.actor')=JSON_EXTRACT(ce.event_args,'$.actor')
   AND JSON_EXTRACT(registration.event_args,'$.registrationMetadataHash')=JSON_EXTRACT(ce.event_args,'$.metadataHash')
   AND JSON_EXTRACT(registration.event_args,'$.timestamp')=JSON_EXTRACT(ce.event_args,'$.createdAt')
+)) AND NOT (ce.event_name='ReceiptApproved' AND EXISTS (
+ SELECT 1 FROM chain_events movement
+ WHERE movement.chain_id=ce.chain_id AND movement.contract_address=ce.contract_address
+  AND movement.transaction_hash=ce.transaction_hash
+  AND (movement.event_name='BatchReceived' AND movement.log_index+1=ce.log_index
+    OR movement.event_name='CustodyClaimed' AND movement.log_index+2=ce.log_index)
+  AND JSON_EXTRACT(movement.event_args,'$.tenantId')=JSON_EXTRACT(ce.event_args,'$.tenantId')
+  AND JSON_EXTRACT(movement.event_args,'$.entityId')=JSON_EXTRACT(ce.event_args,'$.entityId')
+  AND JSON_EXTRACT(movement.event_args,'$.fromOrganizationId')=JSON_EXTRACT(ce.event_args,'$.fromOrganizationId')
+  AND JSON_EXTRACT(movement.event_args,'$.toOrganizationId')=JSON_EXTRACT(ce.event_args,'$.toOrganizationId')
+  AND JSON_EXTRACT(movement.event_args,'$.actor')=JSON_EXTRACT(ce.event_args,'$.approverWallet')
+  AND JSON_EXTRACT(movement.event_args,'$.evidenceHash')=JSON_EXTRACT(ce.event_args,'$.evidenceHash')
+  AND JSON_EXTRACT(movement.event_args,'$.timestamp')=JSON_EXTRACT(ce.event_args,'$.timestamp')
+  AND (movement.event_name='CustodyClaimed' OR (
+   JSON_EXTRACT(movement.event_args,'$.sourceRouteId')=JSON_EXTRACT(ce.event_args,'$.sourceRouteId')
+   AND JSON_EXTRACT(movement.event_args,'$.receivedRouteId')=JSON_EXTRACT(ce.event_args,'$.receivedRouteId')
+   AND JSON_EXTRACT(movement.event_args,'$.quantity')=JSON_EXTRACT(ce.event_args,'$.quantity')))
 ))`;

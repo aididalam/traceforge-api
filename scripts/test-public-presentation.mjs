@@ -36,6 +36,7 @@ try {
   const [eventSchema] = await query("SHOW CREATE TABLE chain_events");
   await query(eventSchema["Create Table"].replace("`chain_events`","`presentation_test_companion_events`"));
   await query(eventSchema["Create Table"].replace("`chain_events`","`presentation_test_registration_events`"));
+  await query(eventSchema["Create Table"].replace("`chain_events`","`presentation_test_movement_events`"));
   await query(readFileSync("migrations/006_public_entity_presentations.sql", "utf8").replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMPORARY TABLE"));
   await connection.beginTransaction();
   for (const id of [entity, linked]) {
@@ -80,8 +81,10 @@ try {
       await query("INSERT INTO presentation_test_companion_events SELECT * FROM chain_events");
       await query("DELETE FROM presentation_test_registration_events");
       await query("INSERT INTO presentation_test_registration_events SELECT * FROM chain_events");
+      await query("DELETE FROM presentation_test_movement_events");
+      await query("INSERT INTO presentation_test_movement_events SELECT * FROM chain_events");
     }
-    return connection.query(sql.replace("FROM chain_events companion","FROM presentation_test_companion_events companion").replace("FROM chain_events registration","FROM presentation_test_registration_events registration"),args);
+    return connection.query(sql.replace("FROM chain_events companion","FROM presentation_test_companion_events companion").replace("FROM chain_events registration","FROM presentation_test_registration_events registration").replace("FROM chain_events movement","FROM presentation_test_movement_events movement"),args);
   };
   await registerPublicDiscoveryRoutes(app, { db: { query: historyQuery },
     chainId: config.traceforge.chainId, contractAddress: config.traceforge.contractAddress });
@@ -111,7 +114,7 @@ try {
     ["EntityClosed",3,removal], ["TraceRecorded",4,{...removal,timestamp:removal.closedAt}],
     ["EntityClosed",5,removal], ["TraceRecorded",6,{...removal,timestamp:removal.closedAt,evidenceHash:h("aa")}],
     ["CustodyClaimed",7,receipt], ["TraceRecorded",8,{...trace,actor:"0x"+"88".repeat(20)}],
-    ["CustodyClaimed",9,receipt], ["TraceRecorded",10,{...trace,organizationId:producer.id}],
+    ["CustodyClaimed",9,receipt], ["TraceRecorded",10,{...trace,organizationId:h("35")}],
     ["CustodyClaimed",11,receipt], ["TraceRecorded",12,{...trace,timestamp:"1790000501"}],
     ["CustodyClaimed",13,receipt], ["TraceRecorded",14,{...trace,eventType:h("bb")}],
     ["CustodyClaimed",15,{...receipt,entityId:linked}], ["TraceRecorded",16,trace],

@@ -4,13 +4,16 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { RowDataPacket } from "mysql2/promise";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { encodeAbiParameters, keccak256, stringToHex, zeroHash } from "viem";
+import { keccak256, stringToHex, zeroHash } from "viem";
+import {createReceiptRequest,listReceiptRequests,decideReceiptRequests} from './receipt-requests.js';
+import {document,productReference} from './business-data.js';
+export {productReference} from './business-data.js';
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { readTraceForge } from "./chain.js";
 import { hashPassword, verifyPassword } from "./operator-credentials.js";
 import { BusinessProblem, businessWrite } from "./business-write.js";
-import { issueProductShortLink, normalizeShortCode } from "./public-short-links.js";
+import { issueProductShortLink } from "./public-short-links.js";
 import { savePublicPresentation } from "./public-presentation.js";
 import type { OperatorPrincipal } from "./operator-data.js";
 import { readProductFields } from "./product-metadata.js";
@@ -37,13 +40,6 @@ const directory = () => {
   if (!configured) throw new BusinessProblem("signup_unavailable", 503);
   return configured.startsWith("~/") ? resolve(homedir(), configured.slice(2)) : resolve(configured);
 };
-async function document(kind: string, value: unknown) {
-  const raw = JSON.stringify(value), contentHash = hash(raw);
-  await db.query(`INSERT IGNORE INTO offchain_documents
-    (content_hash,document_kind,source_ref,byte_length,document_json,raw_text) VALUES (?,?,?,?,?,?)`,
-    [contentHash,kind,"business-dashboard",Buffer.byteLength(raw),raw,raw]);
-  return contentHash;
-}
 
 export interface SignupInput { email: string; password: string; name: string; businessName: string; businessType: string; publicProfile: boolean; businessCode?:string }
 export async function signupBusiness(input: SignupInput) {
@@ -104,22 +100,7 @@ export async function signupBusiness(input: SignupInput) {
   }
 }
 
-export async function productReference(tracking: string) {
-  let trackingId = tracking.toLowerCase();
-  if (normalizeShortCode(trackingId)) {
-    const [aliases] = await db.query<RowDataPacket[]>(`SELECT CONCAT('0x',LOWER(HEX(tracking_id))) AS tracking_id
-      FROM public_entity_short_links WHERE short_code=?`, [trackingId]);
-    if (!aliases[0]) throw new BusinessProblem("product_not_found", 404);
-    trackingId = aliases[0].tracking_id;
-  }
-  if (!/^0x[0-9a-f]{64}$/.test(trackingId)) throw new BusinessProblem("invalid_request", 400);
-  const [rows] = await db.query<RowDataPacket[]>(`SELECT tracking_id,tenant_id,entity_id,creator_organization_id,public_details,publication_initialized,
-    initial_quantity,external_id,registration_metadata_hash FROM business_product_records WHERE tracking_id=?
-    AND (confirmed=TRUE OR initial_quantity IS NULL) AND (chain_id IS NULL OR (chain_id=? AND contract_address=?))`,
-    [trackingId,config.traceforge.chainId,config.traceforge.contractAddress.toLowerCase()]);
-  if (!rows[0]) throw new BusinessProblem("product_not_found", 404);
-  return rows[0];
-}
+
 export async function syncPublicDetails(reference: RowDataPacket) {
   if (!reference.public_details) return;
   if (reference.publication_initialized) {
@@ -203,26 +184,7 @@ export interface IntegrationEvidence {operationId:string;reference:string|null;o
 export interface ReceiveInput {version:string;confirmed:boolean;idempotencyKey:string;sourceRouteId?:string;quantity?:number;integration?:IntegrationEvidence}
 export async function receiveBusinessProduct(principal: OperatorPrincipal, tracking: string,
   input:ReceiveInput) {
-  if (!input.confirmed) throw new BusinessProblem("receipt_confirmation_required", 400);
-  const ref=await productReference(tracking),isBatch=ref.initial_quantity!=null&&BigInt(ref.initial_quantity)>1n;
-  let quantity:number;
-  try{quantity=productQuantity(input.quantity);if(isBatch&&(!input.sourceRouteId||input.quantity===undefined)||!isBatch&&(quantity!==1||input.sourceRouteId))throw new Error("Invalid receipt.");}
-  catch{throw new BusinessProblem("invalid_request",400);}
-  const source=input.sourceRouteId?.toLowerCase();
-  const routeId=isBatch?keccak256(encodeAbiParameters(
-    [{type:"bytes32"},{type:"uint256"},{type:"address"},{type:"bytes32"},{type:"bytes32"},{type:"bytes32"},{type:"bytes32"},{type:"bytes32"}],
-    [hash("TRACEFORGE_RECEIPT_ROUTE_V1"),BigInt(config.traceforge.chainId),config.traceforge.contractAddress as `0x${string}`,
-      ref.tenant_id,ref.entity_id,source as `0x${string}`,principal.organizationId as `0x${string}`,hash(input.idempotencyKey)])):null;
-  const evidence=await document("evidence",{
-    action:"PHYSICAL_RECEIPT",organizationId:principal.organizationId,trackingId:ref.tracking_id,version:input.version,quantity,
-    ...(isBatch?{sourceRouteId:source,receivedRouteId:routeId}:{}),confirmed:true,
-    ...(input.integration?{integration:input.integration}:{}) });
-  const result=await businessWrite({accountId:principal.accountId,organizationId:principal.organizationId,tenantId:ref.tenant_id,entityId:ref.entity_id,
-    operation:isBatch?"claimBatch":"claimCustody",args:isBatch?[ref.tenant_id,ref.entity_id,source,routeId,BigInt(input.version),BigInt(quantity),evidence]:
-      [ref.tenant_id,ref.entity_id,BigInt(input.version),event("PRODUCT_RECEIVED"),evidence],
-    idempotencyKey:input.idempotencyKey,expectedEvent:isBatch?"BatchReceived":"CustodyClaimed"});
-  await syncPublicDetails(ref);
-  return {...result,trackingId:ref.tracking_id,...(isBatch?{receivedRouteId:routeId,quantity:String(quantity)}:{})};
+  return createReceiptRequest(principal,tracking,input);
 }
 export interface RemoveInput {reason?:typeof removalReasons[number];reasonText?:string;confirmed:boolean;idempotencyKey:string;routeId?:string;quantity?:number;version?:string;integration?:IntegrationEvidence}
 export async function closeBusinessProduct(principal:OperatorPrincipal,tracking:string,
@@ -245,4 +207,4 @@ export async function closeBusinessProduct(principal:OperatorPrincipal,tracking:
     idempotencyKey:input.idempotencyKey,expectedEvent:registered?"QuantityRemoved":"EntityClosed"});
   return {...result,trackingId:ref.tracking_id,removedQuantity:String(quantity),...normalized};
 }
-export const businessActions={signup:signupBusiness,create:createBusinessProduct,lookup:receiveLookup,receive:receiveBusinessProduct,close:closeBusinessProduct};
+export const businessActions={signup:signupBusiness,create:createBusinessProduct,lookup:receiveLookup,receive:receiveBusinessProduct,close:closeBusinessProduct,requests:listReceiptRequests,decisions:decideReceiptRequests};

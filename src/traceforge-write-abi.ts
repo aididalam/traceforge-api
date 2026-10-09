@@ -221,6 +221,11 @@ export const traceForgeWriteAbi = [
   },
   {
     "inputs": [],
+    "name": "InvalidReceiptRequest",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidRemovalReasonText",
     "type": "error"
   },
@@ -454,6 +459,28 @@ export const traceForgeWriteAbi = [
   {
     "inputs": [],
     "name": "ProductRemovalRequired",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "requestId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "ReceiptRequestAlreadyApproved",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "requestId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "ReceiptRequestExpired",
     "type": "error"
   },
   {
@@ -1427,6 +1454,85 @@ export const traceForgeWriteAbi = [
       {
         "indexed": true,
         "internalType": "bytes32",
+        "name": "requestId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "tenantId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "fromOrganizationId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "toOrganizationId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "requesterWallet",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "approverWallet",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "sourceRouteId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "receivedRouteId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "quantity",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "evidenceHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "timestamp",
+        "type": "uint64"
+      }
+    ],
+    "name": "ReceiptApproved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
         "name": "tenantId",
         "type": "bytes32"
       },
@@ -1760,6 +1866,90 @@ export const traceForgeWriteAbi = [
   {
     "inputs": [
       {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "tenantId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "entityId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "sourceRouteId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "receivedRouteId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "requestId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "address",
+            "name": "receiverWallet",
+            "type": "address"
+          },
+          {
+            "internalType": "uint64",
+            "name": "expectedVersion",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "quantity",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "expiresAt",
+            "type": "uint64"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "evidenceHash",
+            "type": "bytes32"
+          }
+        ],
+        "internalType": "struct TraceForge.ReceiptApproval",
+        "name": "approval",
+        "type": "tuple"
+      }
+    ],
+    "name": "approveReceipt",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "approvedReceiptRequests",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "bytes32",
         "name": "tenantId",
         "type": "bytes32"
@@ -1794,82 +1984,6 @@ export const traceForgeWriteAbi = [
       }
     ],
     "name": "bindWallet",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "tenantId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "entityId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "sourceRouteId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "receivedRouteId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "uint64",
-        "name": "expectedVersion",
-        "type": "uint64"
-      },
-      {
-        "internalType": "uint64",
-        "name": "quantity",
-        "type": "uint64"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "evidenceHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "claimBatch",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "tenantId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "entityId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "uint64",
-        "name": "expectedVersion",
-        "type": "uint64"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "eventType",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "evidenceHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "claimCustody",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

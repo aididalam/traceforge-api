@@ -7,7 +7,7 @@ import {createServer} from "node:http";
 // Real HTTP, MySQL, worker processes and contract writes on the disposable chain.
 export async function erpIntegrationChecks({request,read,sync,conn,api,actors,invoke,env,apiDist,checks,fetcher,restartApi}){
  const [producer,distributor,shop,other]=actors;
- const scopes=["products:read","products:create","products:receive","products:remove","jobs:read"],passed=[];
+ const scopes=["products:read","products:create","products:receive","products:remove","products:approve","jobs:read"],passed=[];
  const hash=value=>createHash("sha256").update(value).digest("hex");
  const integration=async(path,body,token)=>{
   const response=await fetcher(api+"/integration/v1"+path,{method:body?"POST":"GET",headers:{...(body?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -81,14 +81,31 @@ export async function erpIntegrationChecks({request,read,sync,conn,api,actors,in
  assert.equal((await integration("/products?after=18446744073709551616",undefined,pk.secret)).status,400);
  assert.equal((await integration("/scan?code="+cola.shortCode+"&code="+single.shortCode,undefined,dk.secret)).status,400);
  passed.push("Bulk acceptance is durable before blockchain work, survives API restart and expired leases, normalizes existing QR codes, and atomically rejects conflicting/invalid retries without leaking private products.");
+ const approveJob=async(job,key)=>{
+  const pending=await get(job,key);assert.equal(pending.status,'WAITING_APPROVAL');
+  const groups=new Map();
+  for(const item of pending.items){assert.equal(item.status,'WAITING_APPROVAL');
+   const [row]=await conn.query('SELECT source_organization_id FROM receipt_requests WHERE request_id=?',[item.result.receiptRequestId]);
+   const owner=actors.findIndex(a=>a.user.organizationId===row[0].source_organization_id);assert.ok(owner>=0);
+   const ids=groups.get(owner)??[];ids.push(item.result.receiptRequestId);groups.set(owner,ids);
+  }
+  assert.equal((await integration('/receipt-requests/decisions',{requestIds:pending.items.map(i=>i.result.receiptRequestId),action:'approve',idempotencyKey:randomUUID()},readonly.secret)).status,403);
+  for(const [owner,requestIds] of groups){const response=await integration('/receipt-requests/decisions',{requestIds,action:'approve',idempotencyKey:randomUUID()},keys[owner].secret);
+   assert.equal(response.status,202,JSON.stringify(response.body));assert.ok(response.body.results.every(r=>r.ok),JSON.stringify(response.body));
+  }
+  invoke('api',apiDist+'/erp-worker.js',env,['--once']);
+  await drain();sync();
+ };
  const received=await enqueue(dk,batch([action("receive",cola.shortCode,{sourceRouteId:root,quantity:30,confirmed:true}),action("receive",single.trackingId,{confirmed:true})]));
- await drain();sync();const receiveResult=await get(received,dk);assert.equal(receiveResult.status,"COMPLETED");
+ await drain();assert.equal((await read("getBatchRoute",[producer.user.tenantId,cola.trackingId,root])).availableQuantity,50n);await approveJob(received,dk);const receiveResult=await get(received,dk);assert.equal(receiveResult.status,"COMPLETED");
  const distributorRoute=receiveResult.items[0].result.receivedRouteId;
  assert.equal(await read("isActiveTenantMember",[producer.user.tenantId,distributor.user.organizationId]),false);
  const stocked=await enqueue(sk,batch([action("receive",cola.trackingId,{sourceRouteId:distributorRoute,quantity:20,confirmed:true}),
   action("receive",single.shortCode,{confirmed:true}),action("receive",snack.shortCode,{sourceRouteId:snackRoot,quantity:25,confirmed:true})]));
- await drain();sync();const stockResult=await get(stocked,sk);assert.equal(stockResult.status,"COMPLETED");
+ await drain();await approveJob(stocked,sk);const stockResult=await get(stocked,sk);assert.equal(stockResult.status,"COMPLETED");
  const shopCola=stockResult.items[0].result.receivedRouteId,shopSnack=stockResult.items[2].result.receivedRouteId;
+ const waiting=await enqueue(sk,batch([action("receive",cola.shortCode,{sourceRouteId:root,quantity:5,confirmed:true})]));
+ await drain();assert.equal((await get(waiting,sk)).status,'WAITING_APPROVAL');
  const checkout=batch([action("remove",cola.shortCode,{routeId:shopCola,quantity:3,confirmed:true}),action("remove",single.shortCode,{confirmed:true}),
   action("remove",snack.shortCode,{routeId:shopSnack,quantity:5,reason:"Lost",reasonText:"পরিবহনের সময় হারিয়েছে",confirmed:true}),action("remove",cola.shortCode,{routeId:shopCola,quantity:2,confirmed:true})]);
  const sale=await enqueue(sk,checkout);const saleBefore=await totals();
@@ -110,6 +127,11 @@ export async function erpIntegrationChecks({request,read,sync,conn,api,actors,in
  assert.equal(eventEvidence.integration.reference,checkout.reference);assert.equal(eventEvidence.integration.occurredAt,checkout.occurredAt);
  const beforeReplay=await totals();await enqueue(sk,checkout);await enqueue(sk,{...checkout,idempotencyKey:randomUUID()});assert.equal(await totals(),beforeReplay);
  passed.push("One completed checkout removes multiple products asynchronously, preserves exact batch/single counts and on-chain Unicode reasons, binds receipt references into evidence, and remains idempotent across jobs/concurrent workers.");
+ const waitingStatus=await get(waiting,sk);assert.equal(waitingStatus.status,'WAITING_APPROVAL');
+ const declined=await integration('/receipt-requests/decisions',{requestIds:[waitingStatus.items[0].result.receiptRequestId],action:'decline',idempotencyKey:randomUUID()},pk.secret);
+ assert.equal(declined.status,202);assert.equal(declined.body.results[0].ok,true);
+ invoke('api',apiDist+'/erp-worker.js',env,['--once']);assert.equal((await get(waiting,sk)).items[0].status,'CANCELLED');
+ passed.push('An ERP receipt awaits owner approval without blocking later checkout; decline is reconciled into the original durable job.');
  const mixed=await enqueue(sk,batch([action("remove",snack.shortCode,{routeId:shopSnack,quantity:1,confirmed:true}),
   action("remove",cola.shortCode,{routeId:root,quantity:1,confirmed:true}),action("remove",cola.shortCode,{routeId:shopCola,quantity:100,confirmed:true}),
   action("remove",cola.shortCode,{routeId:shopCola,version:"0",quantity:1,confirmed:true}),action("remove",cola.shortCode,{routeId:"0x"+"00".repeat(32),quantity:1,confirmed:true})]));
@@ -126,7 +148,7 @@ export async function erpIntegrationChecks({request,read,sync,conn,api,actors,in
  const [unfrozen]=await conn.query("SELECT prepared_json FROM erp_operations WHERE operation_id=?",[paused.items[0].operationId]);assert.equal(JSON.stringify(unfrozen[0].prepared_json),frozenJson);
  // A transport failure during contract simulation must be retried, not treated
  // as a permanent contract rejection. This proxy runs only on the test network.
- assert.equal(env.TRACEFORGE_RPC_URL,"http://127.0.0.1:18545");
+ assert.ok(["127.0.0.1","localhost"].includes(new URL(env.TRACEFORGE_RPC_URL).hostname));
  const networkJob=await enqueue(pk,batch([registration("ERP Network recovery","ERP-NETWORK")])),networkBefore=await totals();
  let blockedCalls=0;
  const proxy=createServer(async(req,res)=>{

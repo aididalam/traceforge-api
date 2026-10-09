@@ -7,6 +7,9 @@ import { authenticateErp, enqueueErpJob, getErpJob, ErpProblem, erpScope } from 
 import type { ErpPrincipal } from "../erp.js";
 import { erpProductCode, parseErpBatch } from "../erp-input.js";
 import type { ErpScope, ErpBatch } from "../erp-input.js";
+import {listReceiptRequests,decideReceiptRequests} from '../receipt-requests.js';
+import {receiptDecisions} from '../receipt-input.js';
+import {BusinessProblem} from '../business-write.js';
 
 const uuid = {type: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"};
 const noQuery = {type: "object", additionalProperties: false, properties: {}};
@@ -18,6 +21,7 @@ export async function registerErpRoutes(app: FastifyInstance) {
     erp.addHook("onRequest", async (_request, reply) => { reply.header("Cache-Control", "no-store"); });
     erp.setErrorHandler((error, _request, reply) => {
       if (error instanceof ErpProblem) return reply.code(error.status).send(problem(error.code));
+      if (error instanceof BusinessProblem) return reply.code(error.status).send(problem(error.code));
       const value = error as {validation?: unknown; statusCode?: number; code?: string; status?: number};
       if (value.statusCode === 429) return reply.header("Retry-After", "60").code(429).send(problem("rate_limit_exceeded"));
       if (value.validation || value.statusCode === 400) return reply.code(400).send(problem("invalid_request"));
@@ -29,11 +33,12 @@ export async function registerErpRoutes(app: FastifyInstance) {
     erp.addHook("preValidation", async (request, reply) => {
       const route = request.routeOptions.url ?? "", query = new URL(request.url, "http://erp.local").searchParams;
       const allowed = route.endsWith("/scan") ? ["code"] : route.endsWith("/search") ? ["id", "businessCode", "after", "limit"] :
-        route.endsWith("/products") || route.endsWith("/routes") ? ["after", "limit"] : [];
+        route.endsWith("/receipt-requests")?['direction','after','limit']:route.endsWith("/products") || route.endsWith("/routes") ? ["after", "limit"] : [];
       if ([...query.keys()].some(key => !allowed.includes(key) || query.getAll(key).length !== 1))
         return reply.code(400).send(problem("invalid_request"));
       try {
         if (request.method === "POST" && route.endsWith("/jobs")) batches.set(request, parseErpBatch(request.body));
+        else if(request.method==='POST'&&route.endsWith('/receipt-requests/decisions'))receiptDecisions(request.body);
         else if (request.body !== undefined) throw new Error("Unexpected body.");
       } catch { return reply.code(400).send(problem("invalid_request")); }
     });
@@ -41,7 +46,7 @@ export async function registerErpRoutes(app: FastifyInstance) {
       const identity = await authenticateErp(request.headers.authorization);
       if (!identity) return reply.header("WWW-Authenticate", "Bearer").code(401).send(problem("authentication_required"));
       const route = request.routeOptions.url ?? "";
-      const scope: ErpScope | null = route.includes("/jobs") ? "jobs:read" : route.endsWith("/me") ? null : "products:read";
+      const scope: ErpScope | null = route.endsWith('/receipt-requests/decisions')?'products:approve':route.includes("/jobs") ? "jobs:read" : route.endsWith("/me") ? null : "products:read";
       if (scope && !identity.scopes.includes(scope)) return reply.code(403).send(problem("insufficient_scope"));
       principals.set(request, identity);
     });
@@ -91,5 +96,12 @@ export async function registerErpRoutes(app: FastifyInstance) {
     });
     erp.get<{Params: {jobId: string}}>("/jobs/:jobId", {schema: {tags: ["erp"], security, querystring: noQuery, params: {
       type: "object", additionalProperties: false, required: ["jobId"], properties: {jobId: uuid}}}}, request => getErpJob(principal(request), request.params.jobId));
+    erp.get<{Querystring:{direction?:'incoming'|'outgoing';after?:string;limit?:string}}>('/receipt-requests',{
+      schema:{tags:['erp'],security,querystring:{type:'object',additionalProperties:false,properties:{...page,direction:{type:'string',enum:['incoming','outgoing']}}}}
+    },request=>{const p=pagination(request.query);return listReceiptRequests(principal(request).operator,request.query.direction??'incoming',p.after,p.limit);});
+    erp.post('/receipt-requests/decisions',{
+      bodyLimit:16384,schema:{tags:['erp'],security,querystring:noQuery,body:{type:'object',additionalProperties:false,required:['requestIds','action','idempotencyKey'],properties:{
+        requestIds:{type:'array',minItems:1,maxItems:100,uniqueItems:true,items:uuid},action:{type:'string',enum:['approve','decline','cancel']},idempotencyKey:{type:'string',pattern:'^[A-Za-z0-9_-]{8,64}$'}}}}
+    },async(request,reply)=>reply.code(202).send(await decideReceiptRequests(principal(request).operator,request.body)));
   }, {prefix: "/integration/v1"});
 }

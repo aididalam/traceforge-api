@@ -39,6 +39,7 @@ export async function readTraceForge(
     | "getEntity"
     | "getCustodyVersion"
     | "getProduct"
+    | "approvedReceiptRequests"
     | "getBatchRoute"
     | "getRemovalTotal",
   args: readonly unknown[],

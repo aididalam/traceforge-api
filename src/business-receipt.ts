@@ -11,11 +11,13 @@ export function businessReceiptMatches(input:BusinessWrite,args:Record<string,un
   switch(input.operation){
    case "createProduct":return same(args.organizationId,input.organizationId)&&same(args.actor,actor)&&
     same(args.registrationMetadataHash,input.args[3])&&number(args.initialQuantity,input.args[4]);
-   case "claimCustody":return same(args.toOrganizationId,input.organizationId)&&same(args.actor,actor)&&
-    same(args.evidenceHash,input.args[4])&&version(args.custodyVersion,input.args[2]);
-   case "claimBatch":return same(args.toOrganizationId,input.organizationId)&&same(args.actor,actor)&&
-    same(args.sourceRouteId,input.args[2])&&same(args.receivedRouteId,input.args[3])&&
-    version(args.sourceVersion,input.args[4])&&number(args.quantity,input.args[5])&&same(args.evidenceHash,input.args[6]);
+   case "approveReceipt":{
+    const approval=input.args[0] as Record<string,unknown>;
+    return same(args.fromOrganizationId,input.organizationId)&&same(args.approverWallet,actor)&&
+     same(args.requestId,approval.requestId)&&same(args.requesterWallet,approval.receiverWallet)&&
+     same(args.sourceRouteId,approval.sourceRouteId)&&same(args.receivedRouteId,approval.receivedRouteId)&&
+     number(args.quantity,approval.quantity)&&same(args.evidenceHash,approval.evidenceHash);
+   }
    case "removeProduct":return same(args.organizationId,input.organizationId)&&same(args.actor,actor)&&
     same(args.routeId,input.args[2])&&number(args.quantity,input.args[3])&&version(args.version,input.args[4])&&
     number(args.reason,input.args[5])&&args.reasonText===input.args[6]&&same(args.evidenceHash,input.args[7]);

@@ -7,7 +7,7 @@ export class ErpProblem extends Error {
   constructor(code: string, status = 400) { super(code); this.code = code; this.status = status; }
 }
 
-export const erpScopes = ["products:read", "products:create", "products:receive", "products:remove", "jobs:read"] as const;
+export const erpScopes = ["products:read", "products:create", "products:receive", "products:remove", "products:approve", "jobs:read"] as const;
 export type ErpScope = typeof erpScopes[number];
 export const maxErpOperations = 100;
 export const pendingErpLimit = 1000;

@@ -24,7 +24,7 @@ try{
  const save=()=>writeFile(statePath,JSON.stringify(state,null,2)+"\n",{mode:0o600});
  await save();
  const actors={};
- for(const [role,index,scopes] of [["producer",0,["products:read","products:create","jobs:read"]],
+ for(const [role,index,scopes] of [["producer",0,["products:read","products:create","products:approve","jobs:read"]],
   ["shop",2,["products:read","products:receive","products:remove","jobs:read"]]]){
   const account=accounts[index],login=await h.call("/login",{email:account.email,password:account.password});
   if(!state.actors[role]){
@@ -37,8 +37,16 @@ try{
  const erp=async(actor,path,payload)=>h.request("/integration/v1"+path,payload,actor.key.secret);
  const job=async(actor,payload)=>{
   const accepted=await erp(actor,"/jobs",payload);assert.equal(accepted.status,202,"ERP job was not durably accepted");
+  const approvals=new Set();
   for(let attempt=0;attempt<300;attempt++){
    const poll=await erp(actor,"/jobs/"+accepted.body.jobId);assert.equal(poll.status,200);assert.equal(poll.body.occurredAt,state.occurredAt);
+   const pending=poll.body.items.filter(item=>item.status==='WAITING_APPROVAL'&&item.result?.receiptRequestId&&!approvals.has(item.result.receiptRequestId));
+   if(pending.length){
+    const requestIds=pending.map(item=>item.result.receiptRequestId);
+    const decision=await erp(producer,'/receipt-requests/decisions',{requestIds,action:'approve',idempotencyKey:'live-erp-'+accepted.body.jobId});
+    assert.equal(decision.status,202);assert.ok(decision.body.results.every(item=>item.ok),JSON.stringify(decision.body));
+    requestIds.forEach(id=>approvals.add(id));
+   }
    if(!poll.body.counts.pending){assert.equal(poll.body.status,"COMPLETED",JSON.stringify(poll.body.items.map(i=>({status:i.status,error:i.error}))));return poll.body;}
    await new Promise(done=>setTimeout(done,1000));
   }throw Error("ERP worker did not finish this job; rerun with the same saved keys and payload.");
@@ -86,7 +94,7 @@ try{
  const [journal]=await h.db.query("SELECT COUNT(*) total,SUM(status<>'CONFIRMED') pending,SUM(serialized_transaction IS NOT NULL) signed FROM chain_write_operations");
  assert.equal(Number(journal[0].pending),0);assert.equal(Number(journal[0].signed),0);
  const report={schemaVersion:1,passed:true,verifiedAt:new Date().toISOString(),contract:{address:h.address,runtimeBytecodeHash:h.deployment.artifact.expectedRuntimeHash},
-  network:{chainId:9009},checks:{queuedBulkCreate:true,queuedBulkReceipt:true,queuedCheckout:true,existingQrCodes:true,noReceivingMembership:true,
+  network:{chainId:9009},checks:{queuedBulkCreate:true,queuedBulkReceipt:true,ownerApprovedBulkReceipt:true,queuedCheckout:true,existingQrCodes:true,noReceivingMembership:true,
    duplicateCheckoutPrevented:true,crossBusinessJobHidden:true,routeConservation:true,onChainReceiptsVerified:true,erpEvidenceHashBound:true,serializedTransactionsCleared:true},
   businesses:[producer,shop].map(a=>({name:a.user.organizationName,organizationId:a.user.organizationId})),
   jobs,products:proofs,transactions,erpConfirmedTransactions:9,totalConfirmedTransactions:Number(journal[0].total)};

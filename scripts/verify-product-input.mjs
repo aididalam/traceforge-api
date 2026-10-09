@@ -34,9 +34,10 @@ const receipt={tenantId:base.tenantId,entityId:base.entityId,organizationId:base
 assert.equal(businessReceiptMatches(receiptInput,receipt,actor),true);
 for(const [key,value] of Object.entries({tenantId:hash("99"),entityId:hash("99"),organizationId:hash("99"),actor:"0x"+"99".repeat(20),routeId:hash("99"),quantity:11n,version:3n,reason:2,reasonText:"Changed",evidenceHash:hash("99")}))
  assert.equal(businessReceiptMatches(receiptInput,{...receipt,[key]:value},actor),false,"Mismatched removal receipt: "+key);
-const receiveInput={...base,operation:"claimBatch",args:[base.tenantId,base.entityId,hash("44"),hash("66"),2n,100n,hash("55")]};
-const receiveReceipt={tenantId:base.tenantId,entityId:base.entityId,toOrganizationId:base.organizationId,actor,sourceRouteId:hash("44"),receivedRouteId:hash("66"),sourceVersion:3n,quantity:100n,evidenceHash:hash("55")};
+const approval={tenantId:base.tenantId,entityId:base.entityId,sourceRouteId:hash("44"),receivedRouteId:hash("66"),requestId:hash("77"),receiverWallet:"0x"+"cd".repeat(20),expectedVersion:2n,quantity:100n,expiresAt:4000000000n,evidenceHash:hash("55")};
+const receiveInput={...base,operation:"approveReceipt",args:[approval]};
+const receiveReceipt={tenantId:base.tenantId,entityId:base.entityId,fromOrganizationId:base.organizationId,toOrganizationId:hash("88"),requesterWallet:approval.receiverWallet,approverWallet:actor,requestId:approval.requestId,sourceRouteId:approval.sourceRouteId,receivedRouteId:approval.receivedRouteId,quantity:100n,evidenceHash:approval.evidenceHash};
 assert.equal(businessReceiptMatches(receiveInput,receiveReceipt,actor),true);
-for(const [key,value] of Object.entries({sourceRouteId:hash("99"),receivedRouteId:hash("99"),sourceVersion:2n,quantity:99n,toOrganizationId:hash("99")}))
- assert.equal(businessReceiptMatches(receiveInput,{...receiveReceipt,[key]:value},actor),false,"Mismatched receipt: "+key);
+for(const [key,value] of Object.entries({tenantId:hash("99"),entityId:hash("99"),sourceRouteId:hash("99"),receivedRouteId:hash("99"),quantity:99n,fromOrganizationId:hash("99"),requestId:hash("99"),requesterWallet:actor,approverWallet:approval.receiverWallet,evidenceHash:hash("99")}))
+ assert.equal(businessReceiptMatches(receiveInput,{...receiveReceipt,[key]:value},actor),false,"Mismatched approval receipt: "+key);
 console.log("Receipt verification checks passed: mismatched actor, product, routes, quantities, versions, reasons and evidence cannot confirm a journal.");

@@ -81,7 +81,7 @@ export async function revokeErpKey(principal: OperatorPrincipal, keyId: string) 
 export function safeErpResult(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const source = value as Record<string, unknown>, result: Record<string, unknown> = {};
-  for (const field of ["operationId", "status", "transactionHash", "blockNumber", "trackingId", "shortCode", "receivedRouteId", "quantity", "removedQuantity", "reason", "reasonText"])
+  for (const field of ["operationId", "receiptRequestId", "status", "transactionHash", "blockNumber", "trackingId", "shortCode", "receivedRouteId", "quantity", "removedQuantity", "reason", "reasonText"])
     if (typeof source[field] === "string" || source[field] === null) result[field] = source[field];
   return result;
 }
@@ -99,7 +99,7 @@ export async function getErpJob(principal: ErpPrincipal, jobId: string) {
     else if (row.status === "CANCELLED") counts.cancelled++;
     else counts.pending++;
   }
-  const status = counts.pending ? rows.every(row => row.status === "QUEUED") ? "QUEUED" : "PROCESSING" :
+  const status = counts.pending ? rows.every(row => row.status === "QUEUED") ? "QUEUED" : rows.some(row=>row.status==='WAITING_APPROVAL')&&rows.every(row=>['WAITING_APPROVAL','CONFIRMED','FAILED','CANCELLED'].includes(row.status))?'WAITING_APPROVAL':"PROCESSING" :
     counts.confirmed === counts.total ? "COMPLETED" : counts.confirmed ? "PARTIAL_FAILURE" :
       counts.cancelled === counts.total ? "CANCELLED" : "FAILED";
   return {jobId, status, reference: jobs[0].reference, occurredAt: jobs[0].occurred_at, createdAt: epochIso(jobs[0].created_epoch), counts,
@@ -123,7 +123,7 @@ export async function enqueueErpJob(principal: ErpPrincipal, batch: ErpBatch) {
       if (existing[0].request_hash !== requestHash) throw new ErpProblem("request_conflict", 409);
       jobId = existing[0].job_id;
     } else {
-      const [pending] = await conn.query<RowDataPacket[]>("SELECT COUNT(*) count FROM erp_operations WHERE chain_id=? AND contract_address=? AND organization_id=? AND status IN ('QUEUED','PROCESSING','RETRY')", [...erpScope, org]);
+      const [pending] = await conn.query<RowDataPacket[]>("SELECT COUNT(*) count FROM erp_operations WHERE chain_id=? AND contract_address=? AND organization_id=? AND status IN ('QUEUED','PROCESSING','RETRY','WAITING_APPROVAL')", [...erpScope, org]);
       let newItems = 0;
       for (const item of batch.operations) {
         const [found] = await conn.query<RowDataPacket[]>("SELECT operation_id FROM erp_operations WHERE chain_id=? AND contract_address=? AND organization_id=? AND item_key_hash=?", [...erpScope, org, digest(item.idempotencyKey)]);

@@ -13,23 +13,33 @@ export async function browserIntegrationChecks(h){
  assert.equal(env.TRACEFORGE_RPC_URL,"http://127.0.0.1:18545");assert.equal(api,"http://127.0.0.1:13301");
  const [producer]=actors,secret=randomBytes(32).toString("hex"),manifest=join(walletDir,"browser-fixture.json");
  console.log("Preparing real browser acceptance and BIGINT pagination records.");
- let next,browser;const checkpoints=[],identities=new Map();
+ let next,browser,worker;const checkpoints=[],identities=new Map();
+ const confirmed=async(path,payload)=>{
+  for(let attempt=0;attempt<5;attempt++){
+   const response=await request(path,payload,producer.token);
+   if(response.status===200&&response.body.status==='CONFIRMED')return response.body;
+   const retry=response.status===200&&['PREPARED','BROADCAST'].includes(response.body.status)||
+    response.status===503&&['chain_unavailable','receipt_unverified'].includes(response.body.error?.code);
+   assert.ok(retry,JSON.stringify(response));
+   console.log('Browser preparation retries the same write: '+(response.body.error?.code??response.body.status));
+   await new Promise(done=>setTimeout(done,2000));
+  }throw Error('Browser preparation write did not confirm after bounded retries');
+ };
  // Actual BIGINT event cursors above JS's exact integer range (not fabricated JSON).
  await conn.query("ALTER TABLE chain_events AUTO_INCREMENT=9007199254741000");
  const create=async(name,publish,quantity)=>{
-  const result=await request("/products/create",{name,id:name,quantity,publish,fields:[{label:publish?"Description":"Private note",value:publish?"Synthetic pagination acceptance batch":"PRIVATE_BROWSER_SENTINEL"}],idempotencyKey:randomUUID()},producer.token);
-  assert.equal(result.status,200);assert.equal(result.body.status,"CONFIRMED");sync();return result.body;
+  const result=await confirmed("/products/create",{name,id:name,quantity,publish,fields:[{label:publish?"Description":"Private note",value:publish?"Synthetic pagination acceptance batch":"PRIVATE_BROWSER_SENTINEL"}],idempotencyKey:randomUUID()});
+  sync();return result;
  };
  const privateProduct=await create("Private browser product",false,100);
  const paginated=await create("Paginated browser batch",true,70);
  const original=await read("getProduct",[producer.user.tenantId,paginated.trackingId]);
  for(let version=0;version<55;version++){
-  const result=await request(`/products/${paginated.trackingId}/remove`,{routeId:original.rootRouteId,quantity:1,version:String(version),reason:"Sold",confirmed:true,idempotencyKey:randomUUID()},producer.token);
-  assert.equal(result.status,200);assert.equal(result.body.status,"CONFIRMED");
+  await confirmed(`/products/${paginated.trackingId}/remove`,{routeId:original.rootRouteId,quantity:1,version:String(version),reason:"Sold",confirmed:true,idempotencyKey:randomUUID()});
  }
  sync();
  const snapshot=async()=>{
-  const result={};for(const [table,order] of [["product_quantities","entity_id"],["batch_routes","entity_id,route_id"],["quantity_movements","chain_event_id"],["custody_claims","chain_event_id"],["entities","tenant_id,entity_id"]])
+  const result={};for(const [table,order] of [["product_quantities","entity_id"],["batch_routes","entity_id,route_id"],["quantity_movements","chain_event_id"],["custody_claims","chain_event_id"],["receipt_approvals","chain_event_id"],["entities","tenant_id,entity_id"]])
    result[table]=(await conn.query(`SELECT * FROM ${table} ORDER BY ${order}`))[0];
   return JSON.stringify(result);
  };
@@ -78,7 +88,7 @@ export async function browserIntegrationChecks(h){
    if(req.url==="/checkpoint")result=await checkpoint(body);
    else if(req.url==="/rebuild"){
     sync();const before=await snapshot();invoke("indexer",indexerDist+"/project.js",env);assert.equal(await snapshot(),before);
-    invoke("indexer",indexerDist+"/project.js",env,["--rebuild"]);assert.equal(await snapshot(),before);result={equal:true,tables:5};
+    invoke("indexer",indexerDist+"/project.js",env,["--rebuild"]);assert.equal(await snapshot(),before);result={equal:true,tables:6};
    }else throw Error("Unknown test command");
    res.end(JSON.stringify(result));
   }catch(error){console.error("Browser test control failed: "+error.message);res.writeHead(500).end(JSON.stringify({error:error.message}));}
@@ -86,6 +96,7 @@ export async function browserIntegrationChecks(h){
  await new Promise(done=>server.listen(0,"127.0.0.1",done));
  try{
   await writeFile(manifest,JSON.stringify({controlOrigin:`http://127.0.0.1:${server.address().port}`,controlSecret:secret,actors:actors.map(a=>({name:a.name,email:a.email,organizationId:a.user.organizationId})),privateProduct,paginated}),{mode:0o600});
+  worker=spawn(process.execPath,["dist/erp-worker.js"],{cwd:resolve(root,"api"),env,stdio:"ignore"});
   const uiEnv={...process.env,NEXT_TELEMETRY_DISABLED:"1",TRACEFORGE_PUBLIC_API_ORIGIN:api,TRACEFORGE_OPERATOR_API_ORIGIN:api,TRACEFORGE_OPERATOR_SITE_ORIGIN:"http://127.0.0.1:13478",TRACEFORGE_INTEGRATION_MANIFEST:manifest};
   // Do not pass MySQL credentials, signing configuration or server tokens to the UI.
   for(const key of Object.keys(uiEnv))if(/^(MYSQL_|TRACEFORGE_SIGNER_|TRACEFORGE_BUSINESS_WALLET)/.test(key))delete uiEnv[key];
@@ -98,9 +109,9 @@ export async function browserIntegrationChecks(h){
   const privateResponse=await fetcher(api+"/public/v1/tracking/"+privateProduct.trackingId);assert.equal(privateResponse.status,404);
   checks.push("Unmocked desktop/mobile browsers create singles and million-item batches, resolve duplicate business IDs, receive exact routes, return stock, record bulk sold/lost/spoiled reasons and exhaust the final item; every mutation matches contract and SQL balances.");
   checks.push("Real MySQL event IDs above 2^53 survive API and browser history pagination beyond 50 updates; full quantity, route, movement, custody and entity rebuilds equal their original projections.");
-  return {profiles:2,checkpoints:checkpoints.length,paginatedRemovals:55,eventCursorStartsAt:"9007199254741000",replayTables:5,proofs:checkpoints};
+  return {profiles:2,checkpoints:checkpoints.length,paginatedRemovals:55,eventCursorStartsAt:"9007199254741000",replayTables:6,proofs:checkpoints};
  }finally{
-  for(const child of [browser,next])if(child&&child.exitCode===null)await new Promise(done=>{child.once("exit",done);child.kill("SIGTERM");});
+  for(const child of [browser,next,worker])if(child&&child.exitCode===null)await new Promise(done=>{child.once("exit",done);child.kill("SIGTERM");});
   await new Promise(done=>server.close(done));await rm(manifest,{force:true});
  }
 }

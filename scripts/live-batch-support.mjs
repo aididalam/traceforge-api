@@ -26,7 +26,20 @@ export async function liveBatchContext(){
    const body=await response.json();return {status:response.status,body};
   }throw Error("Live request exhausted Retry-After attempts.");
  };
- const call=async(path,payload,token)=>{const result=await request("/operator/v1"+path,payload,token);assert.equal(result.status,200,`Live ${path}: HTTP ${result.status}, ${result.body.error?.code??"unknown"}`);return result.body;};
+ const call=async(path,payload,token)=>{const result=await request("/operator/v1"+path,payload,token);assert.ok([200,202].includes(result.status),`Live ${path}: HTTP ${result.status}, ${result.body.error?.code??"unknown"}`);return result.body;};
+ const approve=async(pending,actors)=>{
+  assert.equal(pending.status,'WAITING_APPROVAL');
+  const [rows]=await db.query('SELECT source_organization_id FROM receipt_requests WHERE request_id=?',[pending.receiptRequestId]);
+  const owner=actors.find(a=>a.user.organizationId===rows[0]?.source_organization_id);assert.ok(owner,'Source owner is required');
+  const decisions=await call('/receipt-requests/decisions',{requestIds:[pending.receiptRequestId],action:'approve',idempotencyKey:'live-approve-'+pending.receiptRequestId},owner.token);
+  assert.equal(decisions.results[0].ok,true,JSON.stringify(decisions));
+  for(let attempt=0;attempt<180;attempt++){
+   const [current]=await db.query('SELECT status,result_json FROM receipt_requests WHERE request_id=?',[pending.receiptRequestId]);
+   if(current[0].status==='CONFIRMED')return {...pending,...(typeof current[0].result_json==='string'?JSON.parse(current[0].result_json):current[0].result_json),status:'CONFIRMED'};
+   assert.equal(current[0].status,'APPROVING',JSON.stringify(current[0]));
+   await new Promise(done=>setTimeout(done,1000));
+  }throw Error('Owner-approved receipt did not confirm; check the ERP worker.');
+ };
  const sync=async()=>{
   const before=await client.getBlockNumber({cacheTime:0});let next=false;
   for(let attempt=0;attempt<80;attempt++){if(await client.getBlockNumber({cacheTime:0})>before){next=true;break;}await new Promise(done=>setTimeout(done,250));}
@@ -70,5 +83,5 @@ export async function liveBatchContext(){
   const [aliases]=await db.query("SELECT short_code FROM public_entity_short_links WHERE tracking_id=UNHEX(SUBSTRING(?,3))",[id]);assert.equal(aliases.length,1);assert.equal(aliases[0].short_code,product.shortCode);
   return {trackingId:id,name:metadata.name,externalId:metadata.id,shortCode:product.shortCode,initialQuantity:chain.initialQuantity.toString(),availableQuantity:chain.availableQuantity.toString(),removedQuantity:chain.removedQuantity.toString(),isBatch:chain.initialQuantity>1n,closed:entity.closed,rootRouteId:chain.rootRouteId,registrationMetadataHash:chain.registrationMetadataHash,routes:routes.length,removals:movements.length,owned,reasons:totals};
  };
- return {root,base,address,deployment,abi,client,db,read,request,call,sync,prove};
+ return {root,base,address,deployment,abi,client,db,read,request,call,sync,prove,approve};
 }

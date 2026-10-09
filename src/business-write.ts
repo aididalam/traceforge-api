@@ -18,7 +18,7 @@ import type { WriteOperationRow } from "./write-journal.js";
 export class BusinessProblem extends Error {
   constructor(public code: string, public status = 409) { super(code); }
 }
-export type BusinessCall = "registerBusiness" | "createBusinessWorkspace" | "createEntity" | "createProduct" | "claimCustody" | "claimBatch" | "removeProduct" | "closeEntity";
+export type BusinessCall = "registerBusiness" | "createBusinessWorkspace" | "createEntity" | "createProduct" | "approveReceipt" | "removeProduct" | "closeEntity";
 export interface BusinessWrite {
   accountId: string; organizationId: string; tenantId: string; entityId: string;
   operation: BusinessCall; args: readonly unknown[]; idempotencyKey: string; expectedEvent: string;
@@ -44,7 +44,7 @@ export async function businessWrite(input: BusinessWrite) {
     if (!locked) throw new BusinessProblem("business_busy", 429);
     const request = { chainId: config.traceforge.chainId, contractAddress, organizationId: input.organizationId,
       tenantId: input.tenantId, entityId: input.entityId, operation: input.operation,
-      args: input.args.map(value => typeof value === "bigint" ? value.toString() : value), signerAddress: account.address };
+      args: JSON.parse(JSON.stringify(input.args,(_key,value)=>typeof value==='bigint'?value.toString():value)), signerAddress: account.address };
     const requestHash = canonicalRequestHash(request);
     let operation = await getWriteOperation(input.tenantId, input.operation, key);
     if (operation && (operation.request_hash !== requestHash || operation.organization_id !== input.organizationId))

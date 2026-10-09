@@ -31,8 +31,11 @@ session through its own gateway; ERP connectors should use scoped ERP keys.
 
 Business create/receive/remove writes use an `idempotencyKey` in the JSON body.
 Generic broadcasts use the `Idempotency-Key` header. Retry with the same key and
-unchanged data; changed payloads with the same key conflict. A write can return
+unchanged data; changed payloads with the same key conflict. A create/remove write can return
 `BROADCAST` before its receipt is confirmed; only `CONFIRMED` is final success.
+Receive returns HTTP `202` with `WAITING_APPROVAL`. Stock stays with its owner
+until that owner approves and the worker confirms an owner-signed transaction.
+Decline, cancellation and expiry do not transfer stock.
 Indexed searches/history can lag confirmed transactions briefly.
 
 Read quantities, versions, event IDs and block numbers are decimal strings;
@@ -57,8 +60,8 @@ per minute; signup/login have stricter limits. Retry 429 according to Retry-Afte
 
 - [Health and readiness](#health-and-readiness) — 2 endpoints
 - [Business accounts](#business-accounts) — 5 endpoints
-- [Business products and activity](#business-products-and-activity) — 12 endpoints
-- [ERP and POS integration](#erp-and-pos-integration) — 10 endpoints
+- [Business products and activity](#business-products-and-activity) — 15 endpoints
+- [ERP and POS integration](#erp-and-pos-integration) — 12 endpoints
 - [Public product tracking](#public-product-tracking) — 8 endpoints
 - [Private workspace reads](#private-workspace-reads) — 7 endpoints
 - [Generic contract writes](#generic-contract-writes) — 15 endpoints
@@ -389,7 +392,7 @@ Response example (`200`):
 
 ### POST /operator/v1/products/{productId}/receive
 
-Batch receipt requires sourceRouteId, quantity and the current source version. For a single item omit sourceRouteId/quantity and use the lookup version. confirmed=true declares physical handover; no sender proposal is required.
+Batch receipt requires sourceRouteId, quantity and the current source version. For a single item omit sourceRouteId/quantity and use the lookup version. confirmed=true declares physical handover. This creates a request for the current source owner; it does not transfer stock. Requests expire after 72 hours. Owner approval and a confirmed blockchain transaction are required.
 
 Request example:
 
@@ -409,19 +412,165 @@ Content-Type: application/json
 }
 ```
 
-Response example (`200`):
+Response example (`202`):
 
 ```json
 {
   "operationId": "11111111-1111-4111-8111-111111111111",
-  "status": "CONFIRMED",
-  "transactionHash": "0x6666666666666666666666666666666666666666666666666666666666666666",
-  "blockNumber": "120",
+  "receiptRequestId": "11111111-1111-4111-8111-111111111111",
+  "status": "WAITING_APPROVAL",
+  "transactionHash": null,
+  "blockNumber": null,
   "trackingId": "0x2222222222222222222222222222222222222222222222222222222222222222",
   "receivedRouteId": "0x8888888888888888888888888888888888888888888888888888888888888888",
   "quantity": "10"
 }
 ```
+
+### GET /operator/v1/receipt-requests
+
+List requests addressed to your business (`incoming`, default) or submitted by it (`outgoing`). Newest first; use the returned decimal cursor to page backwards. Requester IDs and wallet addresses are authenticated server values. Pending requests do not grant access to private product metadata.
+
+```http
+GET /operator/v1/receipt-requests?direction=incoming&after=0&limit=50
+Authorization: Bearer <sessionToken>
+```
+
+Response example (`200`):
+
+```json
+{
+  "requests": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "trackingId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "name": "Cola batch",
+      "source": {
+        "id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "name": "Sample Business",
+        "walletAddress": "0x3333333333333333333333333333333333333333"
+      },
+      "requester": {
+        "id": "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "name": "Receiving Business",
+        "walletAddress": "0x5555555555555555555555555555555555555555"
+      },
+      "sourceRouteId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+      "quantity": "10",
+      "status": "WAITING_APPROVAL",
+      "createdAt": "2026-10-10T03:00:00.000Z",
+      "expiresAt": "2026-10-13T03:00:00.000Z",
+      "transactionHash": null,
+      "errorCode": null
+    }
+  ],
+  "page": {
+    "hasMore": false,
+    "next": null
+  }
+}
+```
+
+Statuses: `WAITING_APPROVAL`, `APPROVING`, `CONFIRMED`, `DECLINED`, `CANCELLED`, `EXPIRED`, `FAILED`. Poll outgoing requests for the final transfer result; public histories contain confirmed movements only.
+
+### POST /operator/v1/receipt-requests
+
+Submit 1–100 requests. Each item has its own idempotency key. Inspect every `ok` and `error`; HTTP 202 does not mean every item was accepted.
+
+```http
+POST /operator/v1/receipt-requests
+Authorization: Bearer <sessionToken>
+Content-Type: application/json
+```
+
+Request example:
+
+```json
+{
+  "requests": [
+    {
+      "trackingId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "sourceRouteId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+      "quantity": 10,
+      "version": "1",
+      "confirmed": true,
+      "idempotencyKey": "receive_batch_001"
+    }
+  ]
+}
+```
+
+Response example (`202`):
+
+```json
+{
+  "results": [
+    {
+      "trackingId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "ok": true,
+      "result": {
+        "operationId": "11111111-1111-4111-8111-111111111111",
+        "receiptRequestId": "11111111-1111-4111-8111-111111111111",
+        "status": "WAITING_APPROVAL",
+        "transactionHash": null,
+        "blockNumber": null,
+        "trackingId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "receivedRouteId": "0x8888888888888888888888888888888888888888888888888888888888888888",
+        "quantity": "10"
+      },
+      "error": null
+    }
+  ]
+}
+```
+
+### POST /operator/v1/receipt-requests/decisions
+
+The source owner can `approve` or `decline`; the requester can `cancel` while waiting. Supply 1–100 distinct request IDs. Decisions are per item, not an atomic batch. Approval checks current ownership and available quantity, including other approvals queued for the same stock. Waiting requests do not reserve stock. The contract checks quantity and version again before moving it.
+
+```http
+POST /operator/v1/receipt-requests/decisions
+Authorization: Bearer <sessionToken>
+Content-Type: application/json
+```
+
+Request example:
+
+```json
+{
+  "requestIds": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "action": "approve",
+  "idempotencyKey": "approve_batch_001"
+}
+```
+
+Response example (`202`, accepted approval):
+
+```json
+{
+  "results": [
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "ok": true,
+      "result": {
+        "operationId": "11111111-1111-4111-8111-111111111111",
+        "receiptRequestId": "11111111-1111-4111-8111-111111111111",
+        "status": "APPROVING",
+        "transactionHash": null,
+        "blockNumber": null,
+        "trackingId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "receivedRouteId": "0x8888888888888888888888888888888888888888888888888888888888888888",
+        "quantity": "10"
+      },
+      "error": null
+    }
+  ]
+}
+```
+
+An unsuccessful item returns `ok:false`, `result:null` and `error:{"code":"quantity_exceeds_available"}` (or another error code). Repeated identical decisions do not transfer twice. A declined request cannot later be approved; refresh stock and create a new request when appropriate.
 
 ### POST /operator/v1/products/{productId}/remove
 
@@ -837,7 +986,7 @@ idempotency key; the ERP continues using its existing inventory/payment flow.
 
 ### POST /operator/v1/integration-keys
 
-Returns the secret once; store it in the ERP server. Supported scopes: products:read, products:create, products:receive, products:remove and jobs:read. Expiry is 1–365 days (default 365).
+Returns the secret once; store it in the ERP server. Supported scopes: products:read, products:create, products:receive, products:approve, products:remove and jobs:read. Expiry is 1–365 days (default 365).
 
 Request example:
 
@@ -1183,6 +1332,96 @@ Response example (`200`):
 }
 ```
 
+### GET /integration/v1/receipt-requests
+
+Requires `products:read`. Same direction, pagination and response format as the business receipt list, scoped to the ERP key’s business.
+
+```http
+GET /integration/v1/receipt-requests?direction=incoming&limit=50
+Authorization: Bearer <ERP key secret>
+```
+
+Response example (`200`):
+
+```json
+{
+  "requests": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "trackingId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "name": "Cola batch",
+      "source": {
+        "id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "name": "Sample Business",
+        "walletAddress": "0x3333333333333333333333333333333333333333"
+      },
+      "requester": {
+        "id": "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "name": "Receiving Business",
+        "walletAddress": "0x5555555555555555555555555555555555555555"
+      },
+      "sourceRouteId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+      "quantity": "10",
+      "status": "WAITING_APPROVAL",
+      "createdAt": "2026-10-10T03:00:00.000Z",
+      "expiresAt": "2026-10-13T03:00:00.000Z",
+      "transactionHash": null,
+      "errorCode": null
+    }
+  ],
+  "page": {
+    "hasMore": false,
+    "next": null
+  }
+}
+```
+
+### POST /integration/v1/receipt-requests/decisions
+
+Requires `products:approve`. The owner can approve/decline incoming requests; a key for the requesting business can cancel its outgoing requests. The same 1–100 item guards and response format apply. Keep this permission only on systems authorized to decide stock movements.
+
+```http
+POST /integration/v1/receipt-requests/decisions
+Authorization: Bearer <ERP key secret>
+Content-Type: application/json
+```
+
+Request example:
+
+```json
+{
+  "requestIds": [
+    "11111111-1111-4111-8111-111111111111"
+  ],
+  "action": "approve",
+  "idempotencyKey": "erp_approve_001"
+}
+```
+
+Response example (`202`):
+
+```json
+{
+  "results": [
+    {
+      "requestId": "11111111-1111-4111-8111-111111111111",
+      "ok": true,
+      "result": {
+        "operationId": "11111111-1111-4111-8111-111111111111",
+        "receiptRequestId": "11111111-1111-4111-8111-111111111111",
+        "status": "APPROVING",
+        "transactionHash": null,
+        "blockNumber": null,
+        "trackingId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "receivedRouteId": "0x8888888888888888888888888888888888888888888888888888888888888888",
+        "quantity": "10"
+      },
+      "error": null
+    }
+  ]
+}
+```
+
 ### POST /integration/v1/jobs
 
 Queues 1–100 create/receive/remove operations. Requires jobs:read plus each products:<action> scope. The job is durably stored before blockchain processing; 202 means queued, not confirmed. Reuse job/item keys only for identical retries. Different lines need different keys. Batch lines require their source/owned route; an optional version can be frozen by the worker when omitted.
@@ -1249,7 +1488,7 @@ Response example (`202`):
 
 ### GET /integration/v1/jobs/{jobId}
 
-Requires jobs:read. Poll until a terminal status: COMPLETED, PARTIAL_FAILURE, FAILED or CANCELLED. Confirmed lines remain confirmed when another line fails; inspect each item’s result/error.
+Requires jobs:read. Receipt items enter `WAITING_APPROVAL` and include a `receiptRequestId`. Their job may also show `WAITING_APPROVAL`; this is not success. The current source business must approve through its dashboard or the integration decision endpoint. Waiting receipts do not block unrelated queued jobs. Decline/cancel/expiry cancels the receipt item; chain failure marks it failed. Poll until a terminal status: COMPLETED, PARTIAL_FAILURE, FAILED or CANCELLED. Confirmed lines remain confirmed when another line fails; inspect each item’s result/error.
 
 Request example:
 

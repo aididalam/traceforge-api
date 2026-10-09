@@ -48,12 +48,13 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
     operator.addHook("preValidation",async(request,reply)=>{
       const query=new URL(request.url,"http://operator.local").searchParams;
       const route=request.routeOptions.url??"";
-      const paging=route.endsWith("/products")||route.endsWith("/history")||route.endsWith("/routes")||route.endsWith("/holders")||route.endsWith("/search");
-      const keys=route.endsWith("/search")?["after","limit","id","businessCode"]:["after","limit"];
+      const paging=route.endsWith("/products")||route.endsWith("/history")||route.endsWith("/routes")||route.endsWith("/holders")||route.endsWith("/search")||route.endsWith('/receipt-requests');
+      const keys=route.endsWith("/search")?["after","limit","id","businessCode"]:route.endsWith('/receipt-requests')?['direction','after','limit']:["after","limit"];
       if([...query.keys()].some(key=>!paging||!keys.includes(key)||query.getAll(key).length>1))
         return reply.code(400).send(failure("invalid_request","Invalid request parameters."));
       const allowed=route.endsWith("/integration-keys")?["name","scopes","expiresInDays"]:route.endsWith("/signup")?["email","password","name","businessName","businessType","publicProfile","businessCode"]:route.endsWith("/create")?["name","id","quantity","description","fields","publish","idempotencyKey"]:route.endsWith("/receive")?["version","confirmed","idempotencyKey","sourceRouteId","quantity"]:route.endsWith("/close")||route.endsWith("/remove")?["reason","reasonText","routeId","quantity","version","confirmed","idempotencyKey"]:route.endsWith("/login")?["email","password"]:route.endsWith("/activate")?["email","password","name","invitationCode"]:[];
-      if(request.body&&typeof request.body==='object'&&Object.keys(request.body).some(key=>!allowed.includes(key)))
+      const receiptAllowed=route.endsWith('/receipt-requests/decisions')?['requestIds','action','idempotencyKey']:route.endsWith('/receipt-requests')?['requests']:allowed;
+      if(request.body&&typeof request.body==='object'&&Object.keys(request.body).some(key=>!receiptAllowed.includes(key)))
         return reply.code(400).send(failure("invalid_request","Check the information provided."));
       if(route.endsWith("/signup")&&(!request.body||typeof (request.body as Record<string,unknown>).businessType!=="string"))
         return reply.code(400).send(failure("invalid_request","Enter a business type."));
@@ -75,7 +76,7 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
       const problem=error as {code?:string;status?:number;statusCode?:number;validation?:unknown};
       if (problem.status && problem.code && ["insufficient_gas_balance","fee_limit_exceeded","transaction_pending","finality_unavailable","writes_disabled","invalid_request","business_busy","request_conflict","operation_failed",
         "operation_not_allowed","chain_unavailable","receipt_unverified","signup_unavailable","account_unavailable","product_not_found",
-        "business_not_ready","receipt_confirmation_required","close_confirmation_required"].includes(problem.code))
+        "business_not_ready","receipt_confirmation_required","close_confirmation_required","stock_changed","quantity_exceeds_available","request_not_found","request_not_pending","request_expired","too_many_requests"].includes(problem.code))
         return reply.code(problem.status).send(failure(problem.code, "The operation could not be completed. Refresh and check the product."));
       if(problem.statusCode===429||error instanceof AuthenticationBusy) return reply.header("Retry-After","60").code(429).send(failure("rate_limit_exceeded","Please retry later."));
       if(problem.validation||problem.statusCode===400) return reply.code(400).send(failure("invalid_request","Check the information provided."));
@@ -183,8 +184,29 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
           sourceRouteId:{type:"string",pattern:bytes32.source},quantity:{type:"integer",minimum:1,maximum:maxProductQuantity}}}}},
       async(request,reply)=>{
         if(BigInt(request.body.version)>18446744073709551615n)return reply.code(400).send(failure("invalid_request","Refresh the product before receiving."));
-        return deps.actions?deps.actions.receive(context(request),request.params.productId.toLowerCase(),request.body):actionUnavailable(reply);
+        return deps.actions?reply.code(202).send(await deps.actions.receive(context(request),request.params.productId.toLowerCase(),request.body)):actionUnavailable(reply);
       });
+    operator.get<{Querystring:{direction?:'incoming'|'outgoing';after?:string;limit?:string}}>('/receipt-requests',{
+      schema:{tags:['operator-receipts'],security:[{operatorSession:[]}],querystring:{...pageQuery,properties:{...pageQuery.properties,direction:{type:'string',enum:['incoming','outgoing']}}}}
+    },(request,reply)=>{const page=pagination(request.query);return deps.actions?deps.actions.requests(context(request),request.query.direction??'incoming',page.after,page.limit):actionUnavailable(reply);});
+    operator.post<{Body:{requests:(ReceiveInput&{trackingId:string})[]}}>('/receipt-requests',{
+      bodyLimit:256*1024,schema:{tags:['operator-receipts'],security:[{operatorSession:[]}],querystring:noQuery,body:{type:'object',additionalProperties:false,required:['requests'],properties:{
+        requests:{type:'array',minItems:1,maxItems:100,items:{type:'object',additionalProperties:false,required:['trackingId','version','confirmed','idempotencyKey'],properties:{
+          trackingId:{type:'string',pattern:bytes32.source},version:{type:'string',pattern:'^(0|[1-9][0-9]{0,19})$'},confirmed:confirmation,idempotencyKey:keySchema,
+          sourceRouteId:{type:'string',pattern:bytes32.source},quantity:{type:'integer',minimum:1,maximum:maxProductQuantity}}}}}}}
+    },async(request,reply)=>{
+      if(!deps.actions)return actionUnavailable(reply);
+      const results=[];
+      for(const item of request.body.requests){const {trackingId:rawTrackingId,...input}=item;const trackingId=rawTrackingId.toLowerCase();
+        try{results.push({trackingId,ok:true,result:await deps.actions.receive(context(request),trackingId,input),error:null});}
+        catch(error){const code=(error as {code?:string}).code;results.push({trackingId,ok:false,result:null,error:{code:code&&['stock_changed','quantity_exceeds_available','request_conflict','operation_not_allowed','product_not_found','invalid_request','business_not_ready','too_many_requests'].includes(code)?code:'request_unavailable'}});}}
+      return reply.code(202).send({results});
+    });
+    operator.post('/receipt-requests/decisions',{
+      bodyLimit:16384,schema:{tags:['operator-receipts'],security:[{operatorSession:[]}],querystring:noQuery,body:{type:'object',additionalProperties:false,required:['requestIds','action','idempotencyKey'],properties:{
+        requestIds:{type:'array',minItems:1,maxItems:100,uniqueItems:true,items:{type:'string',pattern:'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'}},
+        action:{type:'string',enum:['approve','decline','cancel']},idempotencyKey:keySchema}}}
+    },async(request,reply)=>deps.actions?reply.code(202).send(await deps.actions.decisions(context(request),request.body)):actionUnavailable(reply));
     for(const action of ["close","remove"]){operator.post<{Params:{productId:string};Body:RemoveInput}>("/products/:productId/"+action,{
       bodyLimit:4096,schema:{tags:["operator-dashboard"],security:[{operatorSession:[]}],querystring:noQuery,params:productParams,body:{type:"object",additionalProperties:false,
         required:["confirmed","idempotencyKey",...(action==="remove"?["version"]:[])],properties:{reason:{type:"string",enum:removalReasons},reasonText:{type:"string",maxLength:256},

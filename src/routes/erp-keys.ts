@@ -19,7 +19,7 @@ export async function registerErpKeyRoutes(app: FastifyInstance, principal: (req
     },
     schema: {tags: ["erp-keys"], security: [{operatorSession: []}], querystring: noQuery,
       body: {type: "object", additionalProperties: false, required: ["name", "scopes"], properties: {
-        name: {type: "string", minLength: 1, maxLength: 120}, scopes: {type: "array", minItems: 1, maxItems: 5, uniqueItems: true, items: {type: "string", enum: erpScopes}},
+        name: {type: "string", minLength: 1, maxLength: 120}, scopes: {type: "array", minItems: 1, maxItems: erpScopes.length, uniqueItems: true, items: {type: "string", enum: erpScopes}},
         expiresInDays: {type: "integer", minimum: 1, maximum: 365}}}}}, async (request, reply) => {
     if (!actions) return reply.code(503).send(problem("integration_unavailable"));
     try { return reply.code(201).send(await actions.create(principal(request), request.body)); }

@@ -4,7 +4,8 @@ Part of [TraceForge](https://github.com/aididalam/traceforge). See the parent re
 
 Connects business accounts, public product tracking and ERP/POS systems to TraceForge.
 Validates operations, submits blockchain transactions and serves MySQL projections.
-A durable worker processes bulk ERP operations with retries and idempotency.
+A durable worker processes approved receipt transfers and bulk ERP operations
+with retries, wallet serialization, idempotency and restart recovery.
 
 ## API reference
 
@@ -30,6 +31,18 @@ jobs and shared tracking updates. Business writes require
 `TRACEFORGE_BROADCAST_ENABLED=true` and a private business wallet directory;
 the standalone API defaults to writes disabled. Docker Compose manages these
 services and migrations automatically.
+
+## Verification
+
+`npm run test:receipt-input` checks input boundaries; `npm run
+verify:product-input` checks mined receipt identities. `npm run test:receipt-approval`
+runs the assembled system against a disposable MySQL database and a local private
+RPC (default `http://127.0.0.1:18545`). Provide `MYSQL_HOST`, `MYSQL_PORT`,
+`MYSQL_USER` and `MYSQL_PASSWORD`; build API/indexer and compile contracts first.
+Set `TRACEFORGE_TEST_UI=true` to include real desktop/mobile browser flows.
+`npm run test:receipt-browser` runs those browser flows with a fresh contract and
+database, without repeating the backend/ERP suite. It requires a built UI and
+installed Playwright Chromium, and uses the same MySQL/RPC configuration.
 
 ## License
 

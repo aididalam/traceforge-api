@@ -238,12 +238,18 @@ try {
         return next.event_name==="ProductRegistered"&&next.transaction_hash===row.transaction_hash&&next.log_index===row.log_index+1&&
           matches(a,b,["tenantId","entityId","organizationId","actor"])&&a.metadataHash===b.registrationMetadataHash&&a.createdAt===b.timestamp;
       });
+      if(row.event_name==='ReceiptApproved')return !raw.some(movement=>{
+        const approval=args(row),transfer=args(movement);
+        if(movement.transaction_hash!==row.transaction_hash||!matches(approval,transfer,['tenantId','entityId','fromOrganizationId','toOrganizationId','evidenceHash','timestamp'])||approval.approverWallet!==transfer.actor)return false;
+        if(movement.event_name==='CustodyClaimed')return movement.log_index+2===row.log_index;
+        return movement.event_name==='BatchReceived'&&movement.log_index+1===row.log_index&&matches(approval,transfer,['sourceRouteId','receivedRouteId','quantity']);
+      });
       if(row.event_name!=="TraceRecorded")return true;
       return !raw.some(previous=>{
         const a=args(row),b=args(previous);
         return ["CustodyClaimed","EntityClosed"].includes(previous.event_name)&&previous.transaction_hash===row.transaction_hash&&previous.log_index+1===row.log_index&&
           matches(a,b,["tenantId","entityId","eventType","evidenceHash","actor"])&&
-          a.organizationId===(previous.event_name==="CustodyClaimed"?b.toOrganizationId:b.organizationId)&&
+          (previous.event_name==="CustodyClaimed"?[b.fromOrganizationId,b.toOrganizationId].includes(a.organizationId):a.organizationId===b.organizationId)&&
           a.timestamp===(previous.event_name==="EntityClosed"?b.closedAt:b.timestamp);
       });
     });

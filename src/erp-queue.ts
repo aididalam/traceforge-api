@@ -101,7 +101,10 @@ export async function processErpQueueOnce(options: {shouldStop?:()=>boolean} = {
         const [owned] = await conn.query<RowDataPacket[]>("SELECT operation_id FROM erp_operations WHERE operation_id=? AND lease_token=? AND lease_until>CURRENT_TIMESTAMP(3)", [row.operation_id, leaseToken]);
         if (!owned[0]) throw new ErpProblem("queue_lease_lost", 503);
         const result = await execute(principal, prepared);
-        if (result.status === "CONFIRMED") await save("CONFIRMED", null, result);
+        if (result.status === "WAITING_APPROVAL" || result.status === "APPROVING") await save("WAITING_APPROVAL",null,result);
+        else if (result.status === "CONFIRMED") await save("CONFIRMED", null, result);
+        else if (result.status === "DECLINED" || result.status === "CANCELLED" || result.status === "EXPIRED") await save("CANCELLED", 'request_'+result.status.toLowerCase(), result);
+        else if (result.status === "FAILED") await save("FAILED", 'receipt_failed', result);
         else await save("RETRY", "transaction_pending", result, 2);
       } catch (error) {
         const code = error instanceof ErpProblem || error instanceof BusinessProblem ? error.code : "integration_unavailable";

@@ -65,6 +65,7 @@ export async function productHistory(db: OperatorReader, principal: OperatorPrin
       WHEN 'EntityCreated' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.createdAt'))
       WHEN 'ProductRegistered' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.timestamp'))
       WHEN 'BatchReceived' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.timestamp'))
+      WHEN 'ReceiptApproved' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.timestamp'))
       WHEN 'QuantityRemoved' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.timestamp'))
       WHEN 'TraceRecorded' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.timestamp'))
       WHEN 'CustodyClaimed' THEN JSON_UNQUOTE(JSON_EXTRACT(ce.event_args,'$.timestamp'))

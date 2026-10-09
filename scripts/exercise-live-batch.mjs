@@ -35,7 +35,8 @@ try{
   const preview=await call("/receive/"+product.shortCode,undefined,actor.token);
   const selected=source?preview.routes.find(r=>r.id===source):null;assert.equal(preview.canReceive,true);if(source)assert.ok(selected);
   const body={version:source?selected.version:preview.version,confirmed:true,idempotencyKey:"phase6-"+key,...(source?{sourceRouteId:source,quantity}:{})};
-  const result=await call(`/products/${product.trackingId}/receive`,body,actor.token);assert.equal(result.status,"CONFIRMED");transactions.push(result);await checkpoint(product,Number((await read("getProduct",[product.tenantId,product.trackingId])).availableQuantity));return result.receivedRouteId;
+  const pending=await call(`/products/${product.trackingId}/receive`,body,actor.token);
+  const result=await h.approve(pending,actors);transactions.push(result);await checkpoint(product,Number((await read("getProduct",[product.tenantId,product.trackingId])).availableQuantity));return result.receivedRouteId;
  };
  const remove=async(product,actor,route,quantity,key,reason="Sold",reasonText="")=>{
   const version=route?(await read("getBatchRoute",[product.tenantId,product.trackingId,route])).version:(await read("getCustodyVersion",[product.tenantId,product.trackingId]));
@@ -69,10 +70,11 @@ try{
  const simulate=(actor,functionName,args)=>h.client.simulateContract({address,abi:h.abi,account:wallet(actor),functionName,args});
  await assert.rejects(()=>simulate(shop,"removeProduct",[batch.tenantId,batch.trackingId,ra,1n,source.version,0,"",evidence]),/NotRouteOwner/);
  await assert.rejects(()=>simulate(a,"removeProduct",[batch.tenantId,batch.trackingId,ra,source.availableQuantity+1n,source.version,0,"",evidence]),/InsufficientQuantity/);
- await assert.rejects(()=>simulate(b,"claimBatch",[batch.tenantId,batch.trackingId,ra,child,source.version-1n,1n,evidence]),/StaleRoute/);
- await assert.rejects(()=>simulate(a,"claimBatch",[batch.tenantId,batch.trackingId,ra,child,source.version,1n,evidence]),/InvalidCustodyRecipient/);
- await assert.rejects(()=>simulate(a,"claimBatch",[exhausted.tenantId,exhausted.trackingId,es,child,0n,1n,evidence]),/EntityIsClosed/);
- const snapshot=async()=>JSON.stringify(Object.fromEntries(await Promise.all(["product_quantities","batch_routes","quantity_movements","custody_claims","entities"].map(async table=>[table,(await db.query("SELECT * FROM "+table+" ORDER BY 1,2,3"))[0]]))));
+ const approval=(tenantId,entityId,sourceRouteId,expectedVersion,receiver)=>({tenantId,entityId,sourceRouteId,receivedRouteId:child,requestId:child,receiverWallet:wallet(receiver),expectedVersion,quantity:1n,expiresAt:BigInt(Math.floor(Date.now()/1000)+3600),evidenceHash:evidence});
+ await assert.rejects(()=>simulate(a,"approveReceipt",[approval(batch.tenantId,batch.trackingId,ra,source.version-1n,b)]),/StaleRoute/);
+ await assert.rejects(()=>simulate(a,"approveReceipt",[approval(batch.tenantId,batch.trackingId,ra,source.version,a)]),/InvalidCustodyRecipient/);
+ await assert.rejects(()=>simulate(shop,"approveReceipt",[approval(exhausted.tenantId,exhausted.trackingId,es,0n,a)]),/EntityIsClosed/);
+ const snapshot=async()=>JSON.stringify(Object.fromEntries(await Promise.all(["product_quantities","batch_routes","quantity_movements","custody_claims","receipt_approvals","entities"].map(async table=>[table,(await db.query("SELECT * FROM "+table+" ORDER BY 1,2,3"))[0]]))));
  const before=await snapshot();for(const args of [[],["--rebuild"]]){const {spawnSync}=await import("node:child_process");const result=spawnSync(process.execPath,["dist/project.js",...args],{cwd:resolve(root,"indexer"),env:process.env,encoding:"utf8",timeout:30000});assert.equal(result.status,0);assert.equal(await snapshot(),before);}
  const proofs=[];for(const product of products)proofs.push({...await prove(product),tenantId:product.tenantId,publish:product.publish});
  const [journal]=await db.query("SELECT COUNT(*) total,SUM(status<>'CONFIRMED') unconfirmed,SUM(serialized_transaction IS NOT NULL) signed FROM chain_write_operations");assert.equal(Number(journal[0].unconfirmed),0);assert.equal(Number(journal[0].signed),0);

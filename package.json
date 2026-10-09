@@ -20,7 +20,7 @@
     "start": "node dist/server.js",
     "verify:production-build": "npm run build && node --check dist/server.js",
     "verify:mysql-backup-restore": "node scripts/verify-mysql-backup-restore.mjs",
-    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore && npm run verify:security-hardening && npm run verify:token-expiry && npm run verify:public-discovery && npm run verify:public-tracking && npm run verify:public-presentation && npm run verify:public-short-links && npm run verify:operator-dashboard && npm run verify:product-input && npm run verify:public-products",
+    "verify:deployment-readiness": "npm run verify:operational-readiness && npm run verify:production-build && npm run verify:mysql-backup-restore && npm run verify:security-hardening && npm run verify:token-expiry && npm run verify:public-discovery && npm run verify:public-tracking && npm run verify:public-presentation && npm run verify:public-short-links && npm run verify:operator-dashboard && npm run verify:product-input && npm run verify:public-products && npm run test:receipt-input",
     "verify:security-hardening": "node scripts/verify-security-hardening.mjs",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "verify:token-expiry": "node scripts/verify-token-expiry.mjs",
@@ -40,7 +40,6 @@
     "operator:invite": "tsx src/invite-operator.ts",
     "verify:operator-dashboard": "node scripts/verify-operator-dashboard.mjs",
     "test:operator-dashboard": "node scripts/test-operator-dashboard.mjs",
-    "test:direct-claim": "node scripts/test-direct-claim-integration.mjs",
     "demo:batch": "node scripts/exercise-live-batch.mjs",
     "verify:live-batch": "node scripts/verify-live-batch.mjs",
     "erp:worker": "node dist/erp-worker.js",
@@ -53,7 +52,10 @@
     "public:sync": "tsx src/sync-business-publications.ts",
     "demo:erp": "node scripts/exercise-live-erp.mjs",
     "verify:live-erp": "node scripts/verify-live-erp.mjs",
-    "test:transaction-policy": "npm run build && node --test scripts/test-transaction-policy.mjs"
+    "test:transaction-policy": "npm run build && node --test scripts/test-transaction-policy.mjs",
+    "test:receipt-approval": "node scripts/test-receipt-approval-integration.mjs",
+    "test:receipt-browser": "TRACEFORGE_TEST_UI_ONLY=true node scripts/test-receipt-approval-integration.mjs",
+    "test:receipt-input": "node --test scripts/test-receipt-input.mjs"
   },
   "keywords": [],
   "author": "",
