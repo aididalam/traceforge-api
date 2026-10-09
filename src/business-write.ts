@@ -1,3 +1,5 @@
+import {feePlan,requireGasBalance,policy,TransactionPolicyError} from './transaction-policy.js';
+import {submitPublicTransaction} from './transaction-submit.js';
 import { randomUUID } from "node:crypto";
 import { BaseError, ContractFunctionRevertedError, createWalletClient, decodeEventLog, defineChain, encodeFunctionData, http, keccak256, zeroHash } from "viem";
 import type { Hex } from "viem";
@@ -21,7 +23,7 @@ export interface BusinessWrite {
   accountId: string; organizationId: string; tenantId: string; entityId: string;
   operation: BusinessCall; args: readonly unknown[]; idempotencyKey: string; expectedEvent: string;
 }
-const chain = defineChain({ id: config.traceforge.chainId, name: "TraceForge", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+const chain = defineChain({ id: config.traceforge.chainId, name: "TraceForge", nativeCurrency: { name: policy.symbol, symbol: policy.symbol, decimals: 18 },
   rpcUrls: { default: { http: [config.traceforge.rpcUrl] } } });
 const safeResult = (row: WriteOperationRow) => ({ operationId: row.operation_id, status: row.status,
   transactionHash: row.transaction_hash, blockNumber: row.block_number == null ? null : String(row.block_number) });
@@ -74,10 +76,13 @@ export async function businessWrite(input: BusinessWrite) {
         AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.chainId'))=? AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.contractAddress'))=?
         AND JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.signerAddress'))=?`,[input.organizationId,String(config.traceforge.chainId),contractAddress,account.address]);
       const nonce = Math.max(chainNonce,nonceRows[0].nonce==null?0:Number(nonceRows[0].nonce)+1);
-      const gasEstimate = await chainClient.estimateGas({ account: account.address, to: contractAddress, data, gasPrice: 0n });
+      const fees = await feePlan(chainClient);
+      await requireGasBalance(chainClient,account.address,1n,fees);
+      const gasEstimate = await chainClient.estimateGas({ account: account.address, to: contractAddress, data });
       const gasLimit = (gasEstimate * 120n + 99n) / 100n;
       const wallet = createWalletClient({ account, chain, transport: chainTransport() });
-      const serialized = await wallet.signTransaction({ to: contractAddress, data, nonce, gas: gasLimit, gasPrice: 0n, type: "legacy" });
+      await requireGasBalance(chainClient,account.address,gasLimit,fees);
+      const serialized = await wallet.signTransaction({ to: contractAddress, data, nonce, gas: gasLimit, ...fees });
       const operationId = randomUUID();
       await insertPreparedWriteOperation({ operationId, idempotencyKey: key, requestHash, tokenId: input.accountId,
         tenantId: input.tenantId, organizationId: input.organizationId, entityId: input.entityId, operationName: input.operation,
@@ -92,8 +97,13 @@ export async function businessWrite(input: BusinessWrite) {
       // It may already be mined or submitted; inspect this exact transaction before deciding.
     }
     let receipt;
-    try { receipt = await chainClient.waitForTransactionReceipt({ hash: operation.transaction_hash as Hex, timeout: 15000 }); }
-    catch { return { ...safeResult(operation), status: "BROADCAST" }; }
+    if(policy.public){
+      receipt=await submitPublicTransaction(operation,account);
+      if(!receipt)return {...safeResult(operation),status:"BROADCAST"};
+    }else{
+      try { receipt = await chainClient.waitForTransactionReceipt({ hash: operation.transaction_hash as Hex, timeout: 15000 }); }
+      catch { return { ...safeResult(operation), status: "BROADCAST" }; }
+    }
     if (receipt.status !== "success") {
       await markWriteOperationFailed(operation.operation_id, "transaction_reverted", "Contract rejected this operation.",
         receipt.blockNumber.toString(), receipt.gasUsed.toString(), true);
@@ -108,6 +118,9 @@ export async function businessWrite(input: BusinessWrite) {
     if(!businessReceiptMatches(input,args,account.address))throw new BusinessProblem("receipt_unverified",503);
     await markWriteOperationConfirmed(operation.operation_id, receipt.blockNumber.toString(), receipt.gasUsed.toString());
     return { ...safeResult(operation), status: "CONFIRMED", blockNumber: receipt.blockNumber.toString() };
+  } catch(error) {
+    if(error instanceof TransactionPolicyError)throw new BusinessProblem(error.code,503);
+    throw error;
   } finally {
     if (locked) await conn.query("SELECT RELEASE_LOCK(?)", [lock]);
     conn.release();

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {sourceUrl} from "./test-source-loader.mjs";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -58,7 +59,7 @@ const rateOptions = serverText.match(/await app\.register\(\s*rateLimit,\s*([\s\
 const errorHandler = serverText.match(/app\.setErrorHandler\(\s*([\s\S]*?)\n\);/)?.[1].replace(/,\s*$/, "");
 const apiError = serverText.match(/function apiError\([\s\S]*?\n\}/)?.[0];
 assert.ok(rateOptions && errorHandler && apiError);
-const perimeter = await load(`${apiError}\nexport const options = ${rateOptions};\nexport const handler = ${errorHandler};`);
+const perimeter = await load(`import {proxyClient} from ${JSON.stringify(sourceUrl('src/proxy-client.ts'))};\nconst config={proxyKey:'Synthetic-Proxy-Key'};\n${apiError}\nexport const options = ${rateOptions};\nexport const handler = ${errorHandler};`);
 assert.match(serverText, /await registerPublicTrackingRoutes\(app, \{ db \}\)/);
 assert.doesNotMatch(routeText, /readFile|signer|writeContract|sendRawTransaction|\.post\(/);
 const app = Fastify({ logger: false });

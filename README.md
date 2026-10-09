@@ -30,3 +30,8 @@ jobs and shared tracking updates. Business writes require
 `TRACEFORGE_BROADCAST_ENABLED=true` and a private business wallet directory;
 the standalone API defaults to writes disabled. Docker Compose manages these
 services and migrations automatically.
+
+## License
+
+Licensed under the [MIT License](LICENSE), as part of TraceForge.
+Third-party dependencies retain their own licenses.

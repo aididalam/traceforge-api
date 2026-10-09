@@ -108,6 +108,28 @@ Response example (`200`):
 
 Registers an independent business. Any descriptive business type is accepted; optional businessCode reserves an available custom code. Passwords need 12–128 characters. A pending blockchain registration can return created=false, pending=true; retry with the same account details.
 
+On a public EVM network, a new server-managed business wallet needs native gas
+funds. The pending response can include the address to fund:
+
+```json
+{
+  "created": false,
+  "pending": true,
+  "businessCode": "A",
+  "funding": {
+    "walletAddress": "0x1111111111111111111111111111111111111111",
+    "symbol": "POL"
+  }
+}
+```
+
+Fund that address on the configured network and retry the same signup details.
+Public writes stay pending until their canonical transaction block is finalized.
+`insufficient_gas_balance`, `fee_limit_exceeded`, `transaction_pending` and
+`finality_unavailable` describe funding, configured fee caps and network waits;
+retry an existing operation with its original idempotency key. ERP jobs retry
+these conditions with backoff.
+
 Request example:
 
 ```http

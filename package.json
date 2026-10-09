@@ -52,11 +52,12 @@
     "verify:product-input": "node scripts/verify-product-input.mjs",
     "public:sync": "tsx src/sync-business-publications.ts",
     "demo:erp": "node scripts/exercise-live-erp.mjs",
-    "verify:live-erp": "node scripts/verify-live-erp.mjs"
+    "verify:live-erp": "node scripts/verify-live-erp.mjs",
+    "test:transaction-policy": "npm run build && node --test scripts/test-transaction-policy.mjs"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@fastify/helmet": "13.1.1",
     "@fastify/rate-limit": "11.2.0",

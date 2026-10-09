@@ -73,7 +73,7 @@ export async function registerOperatorRoutes(app:FastifyInstance, deps:{db:Pick<
     });
     operator.setErrorHandler((error,_request,reply)=>{
       const problem=error as {code?:string;status?:number;statusCode?:number;validation?:unknown};
-      if (problem.status && problem.code && ["writes_disabled","invalid_request","business_busy","request_conflict","operation_failed",
+      if (problem.status && problem.code && ["insufficient_gas_balance","fee_limit_exceeded","transaction_pending","finality_unavailable","writes_disabled","invalid_request","business_busy","request_conflict","operation_failed",
         "operation_not_allowed","chain_unavailable","receipt_unverified","signup_unavailable","account_unavailable","product_not_found",
         "business_not_ready","receipt_confirmation_required","close_confirmation_required"].includes(problem.code))
         return reply.code(problem.status).send(failure(problem.code, "The operation could not be completed. Refresh and check the product."));

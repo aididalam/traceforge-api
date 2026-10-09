@@ -1,3 +1,4 @@
+import {policy} from './transaction-policy.js';
 import {
   createHash,
 } from "node:crypto";
@@ -289,6 +290,7 @@ export async function markWriteOperationConfirmed(
       operationId,
     ],
   );
+  if(policy.public)await db.query('UPDATE chain_write_attempts SET serialized_transaction=NULL WHERE operation_id=?',[operationId]);
 }
 
 export async function markWriteOperationFailed(
@@ -331,6 +333,7 @@ export async function markWriteOperationFailed(
       operationId,
     ],
   );
+  if(policy.public&&clearSerializedTransaction)await db.query('UPDATE chain_write_attempts SET serialized_transaction=NULL WHERE operation_id=?',[operationId]);
 }
 
 export async function recordWriteOperationError(

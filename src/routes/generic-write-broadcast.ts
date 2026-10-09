@@ -1,3 +1,4 @@
+import {feePlan,requireGasBalance,policy,TransactionPolicyError} from '../transaction-policy.js';
 import {
   randomUUID,
 } from "node:crypto";
@@ -505,7 +506,7 @@ export async function registerGenericWriteBroadcastRoutes(
 
               return apiError(
                 "broadcast_recovery_pending",
-                error instanceof Error
+                error instanceof Error && !policy.public
                   ? error.message
                   : "Unable to recover the previous generic write yet.",
 
@@ -549,9 +550,7 @@ export async function registerGenericWriteBroadcastRoutes(
         } catch (
           error
         ) {
-          request.log.error(
-            error,
-          );
+          request.log.error(policy.public ? {code:"public_rpc_error"} : error);
 
           reply.code(
             503,
@@ -559,7 +558,7 @@ export async function registerGenericWriteBroadcastRoutes(
 
           return apiError(
             "signer_unavailable",
-            error instanceof Error
+            error instanceof Error && !policy.public
               ? error.message
               : "Signer is unavailable.",
           );
@@ -672,6 +671,7 @@ export async function registerGenericWriteBroadcastRoutes(
             account,
           } as any);
 
+          const fees=await feePlan(chainClient);
           const gasEstimate =
             await chainClient.estimateContractGas({
               address:
@@ -689,8 +689,6 @@ export async function registerGenericWriteBroadcastRoutes(
               account:
                 account.address,
 
-              gasPrice:
-                0n,
             } as any);
 
           const gasLimit =
@@ -722,13 +720,12 @@ export async function registerGenericWriteBroadcastRoutes(
                 args as any,
             } as any);
 
+          await requireGasBalance(chainClient,account.address,gasLimit,fees);
           const serializedTransaction =
             await account.signTransaction({
               chainId:
                 config.traceforge.chainId,
 
-              type:
-                "legacy",
 
               to:
                 contractAddress,
@@ -738,8 +735,7 @@ export async function registerGenericWriteBroadcastRoutes(
               gas:
                 gasLimit,
 
-              gasPrice:
-                0n,
+              ...fees,
 
               nonce,
 
@@ -826,7 +822,7 @@ export async function registerGenericWriteBroadcastRoutes(
             await recordWriteOperationError(
               operationId,
               "broadcast_submit_error",
-              error instanceof Error
+              error instanceof Error && !policy.public
                 ? error.message
                 : "Unknown generic broadcast submission error.",
             );
@@ -899,17 +895,13 @@ export async function registerGenericWriteBroadcastRoutes(
         } catch (
           error
         ) {
-          request.log.error(
-            error,
-          );
+          request.log.error(policy.public ? {code:"public_rpc_error"} : error);
 
-          reply.code(
-            409,
-          );
+          reply.code(policy.public ? 503 : 409);
 
           return apiError(
-            "broadcast_failed",
-            error instanceof Error
+            policy.public ? (error instanceof TransactionPolicyError ? error.code : "chain_unavailable") : "broadcast_failed",
+            error instanceof Error && !policy.public
               ? error.message
               : "Generic write broadcast failed.",
 

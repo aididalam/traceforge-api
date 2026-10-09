@@ -18,6 +18,7 @@ import type { ProductField } from "./product-metadata.js";
 import { productRegistration, productQuantity, removalInput, removalReasons } from "./product-input.js";
 import { reserveBusinessCode } from "./business-codes.js";
 import { quantitySummary, productRoutes } from "./product-quantity.js";
+import {policy} from './transaction-policy.js';
 
 const id = () => "0x" + randomBytes(32).toString("hex");
 const hash = (value: string) => keccak256(stringToHex(value));
@@ -85,6 +86,7 @@ export async function signupBusiness(input: SignupInput) {
   const metadata = await document("organization", { name:account.business_name,organizationType:account.business_type });
   const workspaceMetadata = await document("tenant", { name:account.business_name });
   const base = { accountId:account.account_id,organizationId:account.organization_id,tenantId:account.tenant_id,entityId:zeroHash };
+  try {
   const registered = await businessWrite({ ...base,operation:"registerBusiness",args:[account.organization_id,metadata],
     idempotencyKey:"signup-register",expectedEvent:"OrganizationRegistered" });
   if (registered.status !== "CONFIRMED") return { created:false,pending:true,businessCode };
@@ -93,6 +95,13 @@ export async function signupBusiness(input: SignupInput) {
   if (workspace.status !== "CONFIRMED") return { created:false,pending:true,businessCode };
   await db.query("UPDATE operator_accounts SET active=TRUE WHERE account_id=?", [account.account_id]);
   return { created:true,pending:false,businessCode };
+  } catch(error) {
+    if(policy.public && error instanceof BusinessProblem && error.code==='insufficient_gas_balance') {
+      const [wallets]=await db.query<RowDataPacket[]>('SELECT wallet_address FROM business_wallets WHERE organization_id=?',[account.organization_id]);
+      return {created:false,pending:true,businessCode,funding:{walletAddress:wallets[0].wallet_address,symbol:policy.symbol}};
+    }
+    throw error;
+  }
 }
 
 export async function productReference(tracking: string) {

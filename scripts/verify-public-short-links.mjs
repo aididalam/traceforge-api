@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {sourceUrl} from "./test-source-loader.mjs";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { spawnSync } from "node:child_process";
@@ -70,7 +71,7 @@ const optionsText=serverText.match(/await app\.register\(\s*rateLimit,\s*([\s\S]
 const handlerText=serverText.match(/app\.setErrorHandler\(\s*([\s\S]*?)\n\);/)?.[1].replace(/,\s*$/,"");
 const apiError=serverText.match(/function apiError\([\s\S]*?\n\}/)?.[0];
 assert.ok(optionsText&&handlerText&&apiError);
-const perimeter=await import(url(`${apiError}\nexport const options=${optionsText};\nexport const handler=${handlerText};`));
+const perimeter=await import(url(`import {proxyClient} from ${JSON.stringify(sourceUrl('src/proxy-client.ts'))};\nconst config={proxyKey:'Synthetic-Proxy-Key'};\n${apiError}\nexport const options=${optionsText};\nexport const handler=${handlerText};`));
 const isolatedAuth=readFileSync("src/auth.ts","utf8")
   .replace(/import\s*\{\s*config,?\s*\}\s*from "\.\/config\.js";/,"const config={};")
   .replace(/import\s*\{\s*db,?\s*\}\s*from "\.\/db\.js";/,'const db={query(){throw Error("Offline auth probe accessed DB");}};');

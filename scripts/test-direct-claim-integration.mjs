@@ -16,7 +16,7 @@ const apiDist=process.env.TRACEFORGE_TEST_API_DIST??"dist",indexerDist=process.e
 const apiPort=Number(process.env.TRACEFORGE_TEST_API_PORT??13301);
 assert.ok(Number.isInteger(apiPort)&&apiPort>=13301&&apiPort<=13399,"Use an isolated loopback test port.");
 const root=resolve(".."),rpc="http://127.0.0.1:18545",api="http://127.0.0.1:"+apiPort;
-const local={...process.env,...dotenv.parse(await readFile(".env","utf8").catch(error=>{if(error.code!=="ENOENT")throw error;return "";}))};
+const local={...dotenv.parse(await readFile(".env","utf8").catch(error=>{if(error.code!=="ENOENT")throw error;return "";})),...process.env};
 const database="traceforge_test_claim_"+randomUUID().replaceAll("-","");
 const walletDir=await mkdtemp(join(tmpdir(),"traceforge-claim-wallets-"));
 const admin=await mysql.createConnection({host:local.MYSQL_HOST,port:Number(local.MYSQL_PORT),user:local.MYSQL_USER,password:local.MYSQL_PASSWORD,multipleStatements:true});

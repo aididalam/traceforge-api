@@ -1,3 +1,4 @@
+import {feePlan,policy} from '../transaction-policy.js';
 import type {
   FastifyInstance,
 } from "fastify";
@@ -900,9 +901,7 @@ export async function registerGenericWriteSimulationRoutes(
         } catch (
           error
         ) {
-          request.log.error(
-            error,
-          );
+          request.log.error(policy.public ? {code:"public_rpc_error"} : error);
 
           reply.code(
             503,
@@ -910,7 +909,7 @@ export async function registerGenericWriteSimulationRoutes(
 
           return apiError(
             "signer_unavailable",
-            error instanceof Error
+            error instanceof Error && !policy.public
               ? error.message
               : "Signer is unavailable.",
           );
@@ -1041,8 +1040,7 @@ export async function registerGenericWriteSimulationRoutes(
               account:
                 account.address,
 
-              gasPrice:
-                0n,
+              ...await feePlan(chainClient),
             } as any);
 
           return {
@@ -1092,9 +1090,7 @@ export async function registerGenericWriteSimulationRoutes(
         } catch (
           error
         ) {
-          request.log.error(
-            error,
-          );
+          request.log.error(policy.public ? {code:"public_rpc_error"} : error);
 
           reply.code(
             409,
@@ -1129,7 +1125,7 @@ export async function registerGenericWriteSimulationRoutes(
                 "simulation_failed",
 
               message:
-                error instanceof Error
+                error instanceof Error && !policy.public
                   ? error.message
                   : "Generic write simulation failed.",
             },

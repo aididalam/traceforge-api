@@ -1,3 +1,6 @@
+import {policy,TransactionPolicyError} from './transaction-policy.js';
+import {submitPublicTransaction} from './transaction-submit.js';
+import {loadOrganizationAccount} from './signer.js';
 import {
   decodeEventLog,
 } from "viem";
@@ -878,7 +881,7 @@ async function verifyOperation(
 export async function finalizeGenericWriteReceipt(
   operation: WriteOperationRow,
 ) {
-  const receipt =
+  const receipt = policy.public ? await submitPublicTransaction(operation,await loadOrganizationAccount(operation.organization_id)) :
     await chainClient.waitForTransactionReceipt({
       hash:
         operation.transaction_hash as Hex,
@@ -887,6 +890,7 @@ export async function finalizeGenericWriteReceipt(
         1,
     });
 
+  if(!receipt)throw new TransactionPolicyError("transaction_pending");
   const blockNumber =
     receipt.blockNumber.toString();
 

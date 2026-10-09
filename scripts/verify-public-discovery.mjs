@@ -1,4 +1,4 @@
-import {loadSourceFile} from "./test-source-loader.mjs";
+import {loadSourceFile,sourceUrl} from "./test-source-loader.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -22,7 +22,9 @@ const rateOptions = serverText.match(/await app\.register\(\s*rateLimit,\s*([\s\
 const errorHandler = serverText.match(/app\.setErrorHandler\(\s*([\s\S]*?)\n\);/)?.[1].replace(/,\s*$/, "");
 const apiError = serverText.match(/function apiError\([\s\S]*?\n\}/)?.[0];
 assert.ok(rateOptions && errorHandler && apiError, "Missing perimeter configuration");
-const perimeter = await loadSource(`${apiError}\nexport const options = ${rateOptions};\nexport const handler = ${errorHandler};`);
+const perimeter = await loadSource(`import {proxyClient} from ${JSON.stringify(sourceUrl('src/proxy-client.ts'))};\nconst config={proxyKey:'Synthetic-Proxy-Key'};\n${apiError}\nexport const options = ${rateOptions};\nexport const handler = ${errorHandler};`);
+assert.equal(perimeter.options.keyGenerator({headers:{'x-traceforge-proxy-key':'wrong','x-traceforge-client-ip':'192.0.2.1'},ip:'127.0.0.1'}),'127.0.0.1');
+assert.equal(perimeter.options.keyGenerator({headers:{'x-traceforge-proxy-key':'Synthetic-Proxy-Key','x-traceforge-client-ip':'192.0.2.1'},ip:'127.0.0.1'}),'192.0.2.1');
 assert.equal(perimeter.options.max, 120);
 assert.equal(perimeter.options.timeWindow, "1 minute");
 for (const url of ["/public/v1/example", "/v1/example"]) assert.equal(perimeter.options.allowList({ url, routeOptions: {} }), false);

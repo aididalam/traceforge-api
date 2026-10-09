@@ -16,7 +16,7 @@ interface StoredRequest extends ErpOperation {reference: string | null; occurred
 interface Prepared {action: ErpOperation["action"]; trackingId?: string; input: CreateInput | ReceiveInput | RemoveInput}
 const active = "('QUEUED','PROCESSING','RETRY')";
 const key = (operationId: string) => "erp_" + operationId;
-const transient = new Set(["business_busy", "chain_unavailable", "receipt_unverified", "writes_disabled", "integration_unavailable", "operator_unavailable", "business_not_ready", "queue_lease_lost"]);
+const transient = new Set(["insufficient_gas_balance","fee_limit_exceeded","transaction_pending","finality_unavailable","business_busy", "chain_unavailable", "receipt_unverified", "writes_disabled", "integration_unavailable", "operator_unavailable", "business_not_ready", "queue_lease_lost"]);
 
 async function prepare(row: RowDataPacket): Promise<Prepared> {
   const request = jsonValue<StoredRequest>(row.request_json), idempotencyKey = key(row.operation_id);
